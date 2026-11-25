@@ -1,0 +1,172 @@
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { CheckCircle2, CircleSlash, FileText, ShieldCheck } from 'lucide-react'
+import { useState } from 'react'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input, Textarea } from '@/components/ui/field'
+import { fetchPortalDelivery, savePortalVerdict, submitPortalDecision } from '@/services/delivery-service'
+import { formatDateTime } from '@/shared/lib/datetime'
+import type { AcceptanceVerdict, ManifestCriterion } from '@/shared/types/delivery'
+
+/** 客户验收门户页面，供客户通过分享链接逐条验收并给出结论。 */
+export function AcceptancePortalPage({ token }: { token: string }) {
+  const [email, setEmail] = useState('')
+  const [comment, setComment] = useState('')
+  const [objectionInputs, setObjectionInputs] = useState<Record<string, string>>({})
+  const [result, setResult] = useState('')
+  const { data, isLoading, error } = useQuery({ queryKey: ['portal', token], queryFn: () => fetchPortalDelivery(token) })
+
+  const verdictMutation = useMutation({
+    mutationFn: (input: { criterionKey: string; verdict: string }) =>
+      savePortalVerdict(token, input.criterionKey, { comment: '', email, verdict: input.verdict }),
+  })
+
+  const decisionMutation = useMutation({
+    mutationFn: (value: string) =>
+      submitPortalDecision(token, {
+        comment,
+        decision: value,
+        email,
+        objections: Object.entries(objectionInputs)
+          .filter(([, text]) => text.trim() !== '')
+          .map(([criterionKey, text]) => ({ comment: text, criterionKey })),
+      }),
+    onSuccess: () => setResult('验收结论已提交，开发团队将收到你的确认。'),
+  })
+
+  if (isLoading) {
+    return <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">正在打开验收记录…</div>
+  }
+  if (error || !data) {
+    return (
+      <div className="flex min-h-svh flex-col items-center justify-center gap-3 px-6 text-center">
+        <CircleSlash className="size-8 text-muted-foreground" />
+        <h1 className="text-lg font-medium">链接无效或已过期</h1>
+        <p className="text-sm text-muted-foreground">请向开发团队索取新的验收链接。</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-auto min-h-svh max-w-3xl px-6 py-12">
+      <header className="space-y-4 border-b pb-8">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <ShieldCheck className="size-4" />
+          Veristack 验迹 · 交付验收
+        </div>
+        <div className="space-y-2">
+          <h1 className="text-3xl font-semibold tracking-tight">{data.manifest.projectName}</h1>
+          <p className="text-sm text-muted-foreground">
+            交付版本 v{data.delivery.version} · 需求基线 v{data.manifest.baselineVersion}
+          </p>
+        </div>
+        <Badge tone={data.delivery.status === 'approved' ? 'success' : data.delivery.status === 'rejected' ? 'danger' : 'warning'}>
+          {data.delivery.status === 'approved' ? '已验收通过' : data.delivery.status === 'rejected' ? '已提出异议' : '待验收'}
+        </Badge>
+      </header>
+
+      <section className="space-y-4 py-8">
+        <h2 className="text-lg font-medium">验收条件</h2>
+        <p className="text-sm text-muted-foreground">请逐条判断交付内容是否满足下列条件，并填写你的邮箱以便记录验收人。</p>
+        <Input label="你的邮箱" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="client@example.com" />
+        <ul className="space-y-3">
+          {data.manifest.criteria.map((criterion) => (
+            <CriterionCard
+              criterion={criterion}
+              key={criterion.key}
+              onVerdict={(value) => verdictMutation.mutate({ criterionKey: criterion.key, verdict: value })}
+              onObjection={(value) => setObjectionInputs((current) => ({ ...current, [criterion.key]: value }))}
+              verdict={data.verdicts.find((item) => item.criterionKey === criterion.key)}
+            />
+          ))}
+        </ul>
+      </section>
+
+      <section className="space-y-4 border-t py-8">
+        <h2 className="text-lg font-medium">给出最终结论</h2>
+        <Textarea label="总体说明" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="简要说明你的验收意见" />
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button disabled={!email || decisionMutation.isPending} onClick={() => decisionMutation.mutate('approve')}>
+            确认验收通过
+          </Button>
+          <Button disabled={!email || decisionMutation.isPending} variant="outline" onClick={() => decisionMutation.mutate('reject')}>
+            提出异议
+          </Button>
+        </div>
+        {decisionMutation.isError && (
+          <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">提交失败，请稍后重试。</p>
+        )}
+        {result && (
+          <div className="flex items-center gap-2 rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+            <CheckCircle2 className="size-4" />
+            {result}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-3 border-t py-8">
+        <h2 className="flex items-center gap-2 text-lg font-medium">
+          <FileText className="size-4" />
+          交付证据
+        </h2>
+        {data.evidence.length === 0 && <p className="text-sm text-muted-foreground">本次交付尚未附带证据材料。</p>}
+        <ul className="space-y-2">
+          {data.evidence.map((item) => (
+            <li className="rounded-lg bg-surface-muted p-3" key={item.id}>
+              <p className="text-sm font-medium">{item.title}</p>
+              {item.note && <p className="mt-1 text-sm text-muted-foreground">{item.note}</p>}
+              <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(item.occurredAt)}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  )
+}
+
+/** 单条验收条件卡片，提供通过、不通过与异议填写。 */
+function CriterionCard({
+  criterion,
+  onObjection,
+  onVerdict,
+  verdict,
+}: {
+  criterion: ManifestCriterion
+  onObjection: (value: string) => void
+  onVerdict: (value: string) => void
+  verdict?: AcceptanceVerdict
+}) {
+  const [objection, setObjection] = useState('')
+
+  return (
+    <li className="space-y-3 rounded-lg border p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <span className="text-xs text-muted-foreground">{criterion.requirementCode}</span>
+          <p className="text-sm font-medium">{criterion.description}</p>
+        </div>
+        {verdict && (
+          <Badge tone={verdict.verdict === 'pass' ? 'success' : 'danger'}>
+            {verdict.verdict === 'pass' ? '通过' : '不通过'}
+          </Badge>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={() => onVerdict('pass')} size="sm" variant={verdict?.verdict === 'pass' ? 'default' : 'outline'}>
+          符合
+        </Button>
+        <Button onClick={() => onVerdict('fail')} size="sm" variant={verdict?.verdict === 'fail' ? 'default' : 'outline'}>
+          不符合
+        </Button>
+      </div>
+      <Textarea
+        label="提出异议（可选）"
+        value={objection}
+        onChange={(e) => setObjection(e.target.value)}
+        onBlur={() => objection.trim() && onObjection(objection)}
+        placeholder="若不符合，请说明具体问题"
+      />
+    </li>
+  )
+}

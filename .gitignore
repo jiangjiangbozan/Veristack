@@ -1,0 +1,36 @@
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Go 编译产物
+api/server
+api/server.exe
+api/veristack
+api/veristack.exe
+api/*.exe
+
+# 本地数据与密钥
+api/data/
+data/
+*.key
+*.key.pub
+.env
+.env.local
+
+# 日志
+*.log
+logs/
+
+# 编辑器与工具目录
+.vscode/
+.idea/
+.agents/
+.codebuddy/
+.hermes/
+.qoder/
+.trae/
+.zcode/
+.DS_Store
+Thumbs.db

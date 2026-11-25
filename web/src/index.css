@@ -1,0 +1,73 @@
+@import 'tailwindcss';
+
+/* 语义化颜色变量统一驱动明暗双主题，组件内不写死色值，保证 WCAG AA 对比度。 */
+:root {
+  --background: oklch(0.99 0.004 250);
+  --foreground: oklch(0.21 0.02 250);
+  --surface: oklch(1 0 0);
+  --surface-muted: oklch(0.97 0.006 250);
+  --border: oklch(0.91 0.008 250);
+  --primary: oklch(0.52 0.15 255);
+  --primary-foreground: oklch(0.99 0 0);
+  --muted-foreground: oklch(0.52 0.02 250);
+  --success: oklch(0.62 0.14 155);
+  --warning: oklch(0.72 0.15 75);
+  --danger: oklch(0.58 0.2 25);
+  --info: oklch(0.58 0.12 235);
+  --ring: oklch(0.52 0.15 255 / 0.45);
+  --radius: 0.625rem;
+}
+
+.dark {
+  --background: oklch(0.17 0.018 250);
+  --foreground: oklch(0.96 0.005 250);
+  --surface: oklch(0.21 0.02 250);
+  --surface-muted: oklch(0.25 0.02 250);
+  --border: oklch(0.32 0.02 250);
+  --primary: oklch(0.68 0.14 255);
+  --primary-foreground: oklch(0.18 0.02 250);
+  --muted-foreground: oklch(0.7 0.02 250);
+  --success: oklch(0.72 0.13 155);
+  --warning: oklch(0.8 0.14 75);
+  --danger: oklch(0.7 0.18 25);
+  --info: oklch(0.72 0.12 235);
+  --ring: oklch(0.68 0.14 255 / 0.5);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --radius-card: var(--radius);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}

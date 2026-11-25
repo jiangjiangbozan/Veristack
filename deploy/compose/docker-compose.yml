@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: veristack-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-veristack}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-veristack}
+      POSTGRES_DB: ${POSTGRES_DB:-veristack}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-veristack} -d ${POSTGRES_DB:-veristack}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/api.Dockerfile
+    container_name: veristack-api
+    environment:
+      VERISTACK_DATABASE_DSN: postgres://${POSTGRES_USER:-veristack}:${POSTGRES_PASSWORD:-veristack}@postgres:5432/${POSTGRES_DB:-veristack}?sslmode=disable
+      VERISTACK_AUTH_SECRET: ${VERISTACK_AUTH_SECRET:-change-me-in-production}
+      VERISTACK_LOGLEVEL: ${VERISTACK_LOGLEVEL:-info}
+      VERISTACK_SERVER_ADDR: ':8080'
+      VERISTACK_STORAGE_DRIVER: local
+      VERISTACK_STORAGE_LOCALROOT: /data
+    volumes:
+      - storage_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - '${API_PORT:-8080}:8080'
+
+  web:
+    build:
+      context: ../../web
+      dockerfile: ../deploy/docker/web.Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    container_name: veristack-web
+    depends_on:
+      - api
+    ports:
+      - '${WEB_PORT:-5173}:80'
+
+volumes:
+  postgres_data:
+  storage_data:

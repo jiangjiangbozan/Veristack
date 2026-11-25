@@ -1,0 +1,1789 @@
+openapi: 3.1.0
+info:
+  title: Veristack API
+  version: 1.0.0
+  description: |
+    验迹（Veristack）软件交付证据平台的 REST API 契约。
+
+    资源层级：组织 → 项目 → 需求基线 / 变更申请 / 里程碑 / 交付版本 → 证据 / 验收。
+    客户验收门户通过分享令牌访问，无需登录。
+  contact:
+    name: Veristack
+    url: https://github.com/jiangjiangbozan/Veristack
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: /api/v1
+    description: 当前服务
+tags:
+  - name: System
+    description: 健康检查
+  - name: Auth
+    description: 注册、登录与当前用户
+  - name: Project
+    description: 项目与项目成员
+  - name: Scope
+    description: 需求范围基线
+  - name: Change
+    description: 需求变更申请
+  - name: Milestone
+    description: 交付里程碑
+  - name: Delivery
+    description: 交付版本与交付清单
+  - name: Evidence
+    description: 交付证据
+  - name: Acceptance
+    description: 客户验收与异议闭环
+  - name: Integration
+    description: Webhook、CI 报告与 AI 建议
+
+paths:
+  /healthz:
+    get:
+      tags: [System]
+      summary: 服务健康检查
+      security: []
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            description: 存活状态
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: 注册组织并创建 owner 用户
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: 登录并签发访问令牌
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: 邮箱
+                password:
+                  type: string
+                  description: 密码
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: 读取当前登录用户
+      responses:
+        '200':
+          description: 当前用户
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          user:
+                            $ref: '#/components/schemas/User'
+
+  /projects:
+    get:
+      tags: [Project]
+      summary: 分页列出组织下的项目
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 项目列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Project'
+    post:
+      tags: [Project]
+      summary: 创建项目
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          project:
+                            $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /projects/{projectId}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Project]
+      summary: 读取项目详情
+      responses:
+        '200':
+          description: 项目详情
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                            type: object
+                            properties:
+                              project:
+                                $ref: '#/components/schemas/Project'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Project]
+      summary: 更新项目
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          project:
+                            $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    delete:
+      tags: [Project]
+      summary: 软删除项目
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{projectId}/overview:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Project]
+      summary: 读取项目概览统计
+      responses:
+        '200':
+          description: 概览统计
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProjectOverview'
+
+  /projects/{projectId}/members:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Project]
+      summary: 列出项目成员
+      responses:
+        '200':
+          description: 成员列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Member'
+    post:
+      tags: [Project]
+      summary: 添加项目成员
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: 组织内用户邮箱
+                role:
+                  type: string
+                  enum: [developer, reviewer]
+                  description: 项目角色
+      responses:
+        '200':
+          description: 添加成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{projectId}/scope-baselines:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Scope]
+      summary: 列出需求范围基线
+      responses:
+        '200':
+          description: 基线列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+    post:
+      tags: [Scope]
+      summary: 创建并冻结需求基线
+      description: 冻结后的基线不可编辑，后续调整必须通过变更申请生成新版本。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requirements]
+              properties:
+                requirements:
+                  type: array
+                  minItems: 1
+                  description: 需求条目
+                  items:
+                    $ref: '#/components/schemas/RequirementInput'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /scope-baselines/{baselineId}:
+    parameters:
+      - name: baselineId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 基线 ID
+    get:
+      tags: [Scope]
+      summary: 读取基线详情
+      responses:
+        '200':
+          description: 基线详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /scope-baselines/{baselineId}/diff:
+    parameters:
+      - name: baselineId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 基准基线 ID
+      - name: against
+        in: query
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 对比基线 ID
+    get:
+      tags: [Scope]
+      summary: 对比两个需求基线
+      responses:
+        '200':
+          description: 差异结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{projectId}/change-requests:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PageSize'
+    get:
+      tags: [Change]
+      summary: 分页列出变更申请
+      responses:
+        '200':
+          description: 变更列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+    post:
+      tags: [Change]
+      summary: 发起变更申请
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChangeRequest'
+      responses:
+        '200':
+          description: 发起成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /change-requests/{changeId}:
+    parameters:
+      - name: changeId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 变更申请 ID
+    get:
+      tags: [Change]
+      summary: 读取变更申请详情
+      responses:
+        '200':
+          description: 变更详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /change-requests/{changeId}/decision:
+    parameters:
+      - name: changeId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 变更申请 ID
+    post:
+      tags: [Change]
+      summary: 客户确认或拒绝变更申请
+      description: 批准时在同一事务内生成新的范围基线版本，旧版本保持只读。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [approve, reject]
+                  description: 决定
+                comment:
+                  type: string
+                  description: 决定意见
+      responses:
+        '200':
+          description: 处理成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{projectId}/milestones:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Milestone]
+      summary: 列出里程碑
+      responses:
+        '200':
+          description: 里程碑列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+    post:
+      tags: [Milestone]
+      summary: 创建里程碑
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  description: 里程碑名称
+                requirementIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: 关联需求 ID
+                targetDate:
+                  type: string
+                  format: date
+                  description: 目标日期
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /milestones/{milestoneId}:
+    parameters:
+      - name: milestoneId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 里程碑 ID
+    get:
+      tags: [Milestone]
+      summary: 读取里程碑详情
+      responses:
+        '200':
+          description: 里程碑详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+    put:
+      tags: [Milestone]
+      summary: 更新里程碑
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, status]
+              properties:
+                name:
+                  type: string
+                  description: 里程碑名称
+                requirementIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: 关联需求 ID
+                status:
+                  type: string
+                  enum: [completed, pending, in_progress]
+                  description: 里程碑状态
+                targetDate:
+                  type: string
+                  format: date
+                  description: 目标日期
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+    delete:
+      tags: [Milestone]
+      summary: 软删除里程碑
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{projectId}/deliveries:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Delivery]
+      summary: 列出交付版本
+      responses:
+        '200':
+          description: 交付列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+    post:
+      tags: [Delivery]
+      summary: 创建交付版本并冻结清单
+      description: 清单在创建时即冻结，生成 SHA-256 摘要，后续不可覆盖。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [baselineVersion, version]
+              properties:
+                baselineVersion:
+                  type: integer
+                  minimum: 1
+                  description: 来源需求基线版本
+                buildNo:
+                  type: string
+                  description: 构建号
+                gitRef:
+                  type: string
+                  description: Git 提交或标签
+                milestoneIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: 关联里程碑 ID
+                version:
+                  type: integer
+                  minimum: 1
+                  description: 交付版本号
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /deliveries/{deliveryId}:
+    parameters:
+      - name: deliveryId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 交付版本 ID
+    get:
+      tags: [Delivery]
+      summary: 读取交付详情
+      responses:
+        '200':
+          description: 交付详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /deliveries/{deliveryId}/manifest:
+    parameters:
+      - name: deliveryId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 交付版本 ID
+    get:
+      tags: [Delivery]
+      summary: 读取交付清单快照
+      responses:
+        '200':
+          description: 交付清单
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /deliveries/{deliveryId}/submit:
+    parameters:
+      - name: deliveryId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 交付版本 ID
+    post:
+      tags: [Delivery]
+      summary: 提交客户验收
+      responses:
+        '200':
+          description: 提交成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /deliveries/{deliveryId}/pack:
+    parameters:
+      - name: deliveryId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 交付版本 ID
+    post:
+      tags: [Delivery]
+      summary: 导出 Evidence Pack
+      description: 把交付清单与证据附件打包，配置签名私钥时附带 Ed25519 签名，可离线独立核验。
+      responses:
+        '200':
+          description: 导出成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /deliveries/{deliveryId}/evidence:
+    parameters:
+      - name: deliveryId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 交付版本 ID
+    get:
+      tags: [Evidence]
+      summary: 列出交付证据时间线
+      responses:
+        '200':
+          description: 证据列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+    post:
+      tags: [Evidence]
+      summary: 登记证据
+      description: 提交 JSON 为人工说明型证据，提交 multipart 为附件上传。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, type]
+              properties:
+                note:
+                  type: string
+                  description: 证据说明
+                requirementId:
+                  type: string
+                  format: uuid
+                  description: 关联需求 ID
+                source:
+                  type: string
+                  description: 证据来源
+                title:
+                  type: string
+                  description: 证据标题
+                type:
+                  type: string
+                  enum: [ci_report, document, git_commit, manual, recording, screenshot, test_report]
+                  description: 证据类型
+          multipart/form-data:
+            schema:
+              type: object
+              required: [title, type, file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 证据附件
+                note:
+                  type: string
+                  description: 证据说明
+                title:
+                  type: string
+                  description: 证据标题
+                type:
+                  type: string
+                  description: 证据类型
+      responses:
+        '200':
+          description: 登记成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /projects/{projectId}/evidence:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    get:
+      tags: [Evidence]
+      summary: 列出项目全部证据
+      responses:
+        '200':
+          description: 证据列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /deliveries/{deliveryId}/share-token:
+    parameters:
+      - name: deliveryId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 交付版本 ID
+    post:
+      tags: [Acceptance]
+      summary: 生成客户验收分享链接
+      description: 明文令牌只在本次响应返回，数据库仅保存摘要。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expiresInDays:
+                  type: integer
+                  minimum: 1
+                  maximum: 90
+                  description: 链接有效期天数
+      responses:
+        '200':
+          description: 生成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /deliveries/{deliveryId}/acceptance:
+    parameters:
+      - name: deliveryId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 交付版本 ID
+    get:
+      tags: [Acceptance]
+      summary: 读取验收概览
+      responses:
+        '200':
+          description: 验收概览
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /objections/{objectionId}/replies:
+    parameters:
+      - name: objectionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 异议 ID
+    post:
+      tags: [Acceptance]
+      summary: 回复客户异议
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  description: 回复内容
+      responses:
+        '200':
+          description: 回复成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /objections/{objectionId}/resolve:
+    parameters:
+      - name: objectionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 异议 ID
+    post:
+      tags: [Acceptance]
+      summary: 关闭客户异议
+      responses:
+        '200':
+          description: 关闭成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /share/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 分享令牌明文
+    get:
+      tags: [Acceptance]
+      summary: 客户门户读取交付内容
+      security: []
+      responses:
+        '200':
+          description: 交付内容、清单与已有裁定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /share/{token}/verdicts/{criterionKey}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 分享令牌明文
+      - name: criterionKey
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 验收条件稳定键
+    post:
+      tags: [Acceptance]
+      summary: 保存单条验收裁定
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, verdict]
+              properties:
+                comment:
+                  type: string
+                  description: 裁定说明
+                email:
+                  type: string
+                  format: email
+                  description: 验收人邮箱
+                verdict:
+                  type: string
+                  enum: [fail, pass]
+                  description: 裁定结论
+      responses:
+        '200':
+          description: 保存成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /share/{token}/decision:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 分享令牌明文
+    post:
+      tags: [Acceptance]
+      summary: 客户提交最终验收结论
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, decision]
+              properties:
+                comment:
+                  type: string
+                  description: 总体说明
+                decision:
+                  type: string
+                  enum: [approve, reject]
+                  description: 验收结论
+                email:
+                  type: string
+                  format: email
+                  description: 验收人邮箱
+                objections:
+                  type: array
+                  description: 客户提出的异议
+                  items:
+                    type: object
+                    required: [criterionKey, comment]
+                    properties:
+                      criterionKey:
+                        type: string
+                        description: 验收条件稳定键
+                      comment:
+                        type: string
+                        description: 异议内容
+      responses:
+        '200':
+          description: 提交成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /webhooks/{provider}/projects/{projectId}:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [gitee, github, gitlab]
+        description: 第三方平台
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 所属项目 ID
+    post:
+      tags: [Integration]
+      summary: 接收第三方 Webhook 事件
+      description: 先保存原始载荷再创建异步任务；GitHub 使用 HMAC-SHA256 签名校验，GitLab 与 Gitee 使用令牌校验。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: 第三方平台的原始事件载荷
+      responses:
+        '200':
+          description: 已接收
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /projects/{projectId}/webhooks:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PageSize'
+    get:
+      tags: [Integration]
+      summary: 列出收到的 Webhook 事件
+      responses:
+        '200':
+          description: 事件列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{projectId}/ci-reports:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PageSize'
+    get:
+      tags: [Integration]
+      summary: 列出导入的 CI 报告
+      responses:
+        '200':
+          description: 报告列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+    post:
+      tags: [Integration]
+      summary: 导入 CI 测试报告
+      description: 解析标准 JUnit XML，汇总通过、失败、跳过与耗时。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reportXml]
+              properties:
+                buildNo:
+                  type: string
+                  description: 构建号
+                deliveryId:
+                  type: string
+                  format: uuid
+                  description: 关联交付版本 ID
+                gitRef:
+                  type: string
+                  description: Git 提交或标签
+                provider:
+                  type: string
+                  description: 来源平台
+                reportXml:
+                  type: string
+                  description: JUnit XML 报告内容
+      responses:
+        '200':
+          description: 导入成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /projects/{projectId}/ai/requirements:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    post:
+      tags: [Integration]
+      summary: 从需求文档提取候选需求
+      description: 产出为待确认草稿，不会自动写入需求基线。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  description: 原始需求文档
+      responses:
+        '200':
+          description: 生成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{projectId}/ai/change-impact:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    post:
+      tags: [Integration]
+      summary: 生成变更影响分析建议
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [changeRequestId]
+              properties:
+                changeRequestId:
+                  type: string
+                  format: uuid
+                  description: 变更申请 ID
+      responses:
+        '200':
+          description: 生成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{projectId}/ai/delivery-summary:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    post:
+      tags: [Integration]
+      summary: 生成交付摘要建议
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deliveryId]
+              properties:
+                deliveryId:
+                  type: string
+                  format: uuid
+                  description: 交付版本 ID
+      responses:
+        '200':
+          description: 生成成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{projectId}/ai/suggestions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+      - name: kind
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [change_impact, delivery_summary, requirement_extraction]
+        description: 建议类型，留空返回全部
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/PageSize'
+    get:
+      tags: [Integration]
+      summary: 列出 AI 建议草稿
+      responses:
+        '200':
+          description: 建议列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /ai/suggestions/{suggestionId}/apply:
+    parameters:
+      - name: suggestionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 建议 ID
+    post:
+      tags: [Integration]
+      summary: 采纳 AI 建议
+      description: 仅改变建议状态，不会自动改写正式基线或交付结论。
+      responses:
+        '200':
+          description: 采纳成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /ai/suggestions/{suggestionId}/dismiss:
+    parameters:
+      - name: suggestionId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 建议 ID
+    post:
+      tags: [Integration]
+      summary: 忽略 AI 建议
+      responses:
+        '200':
+          description: 忽略成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 注册或登录后获得的访问令牌
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: 页码
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: 每页条数
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: 项目 ID
+
+  responses:
+    BadRequest:
+      description: 请求参数不合法
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AppError'
+    Unauthorized:
+      description: 未认证或签名校验失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AppError'
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AppError'
+
+  schemas:
+    Envelope:
+      type: object
+      required: [code, message, success]
+      properties:
+        code:
+          type: string
+          description: 业务错误码，成功时为空串
+        data:
+          description: 接口返回数据，结构随接口而定
+        message:
+          type: string
+          description: 面向用户的提示信息
+        page:
+          $ref: '#/components/schemas/Page'
+        success:
+          type: boolean
+          description: 是否成功
+
+    AppError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: 稳定错误码，例如 bad_request、unauthorized、not_found
+        message:
+          type: string
+          description: 面向用户的可读信息
+
+    Page:
+      type: object
+      required: [page, pageSize, total]
+      properties:
+        page:
+          type: integer
+          description: 当前页码
+        pageSize:
+          type: integer
+          description: 每页条数
+        total:
+          type: integer
+          description: 总条数
+
+    AuthResult:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+          description: 访问令牌
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      required: [id, email, displayName, role]
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+          description: 创建时间
+        displayName:
+          type: string
+          description: 显示名称
+        email:
+          type: string
+          format: email
+          description: 邮箱
+        id:
+          type: string
+          format: uuid
+          description: 用户 ID
+        organizationId:
+          type: string
+          format: uuid
+          description: 所属组织 ID
+        role:
+          type: string
+          enum: [admin, customer, developer, owner, reviewer]
+          description: 用户角色
+        status:
+          type: string
+          description: 账号状态
+
+    RegisterRequest:
+      type: object
+      required: [displayName, email, organizationName, password]
+      properties:
+        displayName:
+          type: string
+          maxLength: 50
+          description: 姓名
+        email:
+          type: string
+          format: email
+          maxLength: 120
+          description: 邮箱
+        organizationName:
+          type: string
+          maxLength: 80
+          description: 组织名称
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+          description: 密码
+
+    Project:
+      type: object
+      required: [id, name, status]
+      properties:
+        archived:
+          type: boolean
+          description: 是否归档
+        clientName:
+          type: string
+          description: 客户名称
+        contractNo:
+          type: string
+          description: 合同编号
+        createdAt:
+          type: string
+          format: date-time
+          description: 创建时间
+        description:
+          type: string
+          description: 项目描述
+        endDate:
+          type: string
+          format: date
+          description: 结束日期
+        id:
+          type: string
+          format: uuid
+          description: 项目 ID
+        name:
+          type: string
+          description: 项目名称
+        startDate:
+          type: string
+          format: date
+          description: 开始日期
+        status:
+          type: string
+          description: 项目状态
+        updatedAt:
+          type: string
+          format: date-time
+          description: 更新时间
+
+    CreateProjectRequest:
+      type: object
+      required: [name, clientName]
+      properties:
+        clientName:
+          type: string
+          maxLength: 120
+          description: 客户名称
+        contractNo:
+          type: string
+          maxLength: 60
+          description: 合同编号
+        description:
+          type: string
+          maxLength: 2000
+          description: 项目描述
+        endDate:
+          type: string
+          format: date
+          description: 结束日期
+        name:
+          type: string
+          maxLength: 120
+          description: 项目名称
+        startDate:
+          type: string
+          format: date
+          description: 开始日期
+
+    UpdateProjectRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateProjectRequest'
+        - type: object
+          required: [status]
+          properties:
+            archived:
+              type: boolean
+              description: 是否归档
+            status:
+              type: string
+              enum: [active, completed, archived]
+              description: 项目状态
+
+    Member:
+      type: object
+      properties:
+        displayName:
+          type: string
+          description: 显示名称
+        email:
+          type: string
+          format: email
+          description: 邮箱
+        id:
+          type: string
+          format: uuid
+          description: 用户 ID
+        role:
+          type: string
+          description: 项目角色
+
+    ProjectOverview:
+      type: object
+      properties:
+        baselineCount:
+          type: integer
+          description: 范围基线版本数
+        changeRequestCount:
+          type: integer
+          description: 变更申请数
+        milestoneCount:
+          type: integer
+          description: 里程碑数
+        requirementCount:
+          type: integer
+          description: 最新基线需求数
+
+    Requirement:
+      type: object
+      properties:
+        acceptanceCriteria:
+          type: array
+          items:
+            type: string
+          description: 验收条件
+        code:
+          type: string
+          description: 需求编号
+        description:
+          type: string
+          description: 需求描述
+        id:
+          type: string
+          format: uuid
+          description: 需求 ID
+        priority:
+          type: string
+          enum: [high, low, medium]
+          description: 优先级
+        status:
+          type: string
+          description: 需求状态
+        title:
+          type: string
+          description: 需求标题
+
+    RequirementInput:
+      type: object
+      required: [code, title, priority]
+      properties:
+        acceptanceCriteria:
+          type: array
+          items:
+            type: string
+          description: 验收条件
+        code:
+          type: string
+          maxLength: 30
+          description: 需求编号
+        description:
+          type: string
+          maxLength: 2000
+          description: 需求描述
+        priority:
+          type: string
+          enum: [high, low, medium]
+          description: 优先级
+        title:
+          type: string
+          maxLength: 200
+          description: 需求标题
+
+    Baseline:
+      type: object
+      properties:
+        changeRequestId:
+          type: string
+          format: uuid
+          description: 触发该版本的变更申请
+        createdAt:
+          type: string
+          format: date-time
+          description: 创建时间
+        frozenAt:
+          type: string
+          format: date-time
+          description: 冻结时间
+        id:
+          type: string
+          format: uuid
+          description: 基线 ID
+        projectId:
+          type: string
+          format: uuid
+          description: 所属项目
+        requirements:
+          type: array
+          items:
+            $ref: '#/components/schemas/Requirement'
+          description: 需求快照
+        version:
+          type: integer
+          description: 版本号
+
+    BaselineDiff:
+      type: object
+      properties:
+        added:
+          type: array
+          items:
+            $ref: '#/components/schemas/Requirement'
+          description: 新增需求
+        modified:
+          type: array
+          items:
+            $ref: '#/components/schemas/Requirement'
+          description: 修改需求
+        removed:
+          type: array
+          items:
+            $ref: '#/components/schemas/Requirement'
+          description: 删除需求
+
+    ChangeRequest:
+      type: object
+      properties:
+        baselineId:
+          type: string
+          format: uuid
+          description: 来源基线
+        createdAt:
+          type: string
+          format: date-time
+          description: 创建时间
+        decidedAt:
+          type: string
+          format: date-time
+          description: 决定时间
+        id:
+          type: string
+          format: uuid
+          description: 变更 ID
+        impact:
+          type: string
+          description: 影响说明
+        projectId:
+          type: string
+          format: uuid
+          description: 所属项目
+        reason:
+          type: string
+          description: 变更原因
+        requesterId:
+          type: string
+          format: uuid
+          description: 发起人
+        status:
+          type: string
+          enum: [approved, pending, rejected]
+          description: 状态
+        type:
+          type: string
+          description: 变更类型
+
+    CreateChangeRequest:
+      type: object
+      required: [reason, type, requirements]
+      properties:
+        impact:
+          type: string
+          maxLength: 2000
+          description: 影响说明
+        reason:
+          type: string
+          maxLength: 1000
+          description: 变更原因
+        requirements:
+          type: array
+          minItems: 1
+          description: 拟议的需求调整
+          items:
+            type: object
+            required: [code, title, priority, operation]
+            properties:
+              acceptanceCriteria:
+                type: array
+                items:
+                  type: string
+                description: 验收条件
+              code:
+                type: string
+                description: 需求编号
+              description:
+                type: string
+                description: 需求描述
+              operation:
+                type: string
+                enum: [add, modify, remove]
+                description: 调整方式
+              priority:
+                type: string
+                enum: [high, low, medium]
+                description: 优先级
+              title:
+                type: string
+                description: 需求标题
+        type:
+          type: string
+          enum: [add, modify, remove]
+          description: 变更类型
+
+security:
+  - bearerAuth: []
