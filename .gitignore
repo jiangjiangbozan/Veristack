@@ -10,6 +10,9 @@ api/server.exe
 api/veristack
 api/veristack.exe
 api/*.exe
+api/*~
+api/*.test
+api/*.out
 
 # 本地数据与密钥
 api/data/
