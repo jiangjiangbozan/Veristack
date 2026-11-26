@@ -2,6 +2,7 @@
 package evidence
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -84,7 +85,10 @@ func (h *Handler) createManual(w http.ResponseWriter, r *http.Request, delivery 
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "evidence.create", item.ID, nil, item)
+	if err := h.recordAudit(r.Context(), r, principal, "evidence.create", item.ID, nil, item); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, CreateEvidenceResponse{Evidence: views.FromEvidence(item)})
 }
 
@@ -180,9 +184,9 @@ func (h *Handler) principal(r *http.Request) (access.Principal, *db.Queries, err
 }
 
 // recordAudit 记录证据写操作的审计事件。
-func (h *Handler) recordAudit(r *http.Request, principal access.Principal, action string, evidenceID uuid.UUID, before, after any) {
-	writer := audit.Writer{Queries: db.New(h.Service.Database)}
-	_ = writer.Record(r.Context(), audit.FromRequest(r, principal.ID), action, "evidence_item", evidenceID, before, after)
+func (h *Handler) recordAudit(ctx context.Context, r *http.Request, principal access.Principal, action string, evidenceID uuid.UUID, before, after any) error {
+	writer := audit.WriterFor(ctx, h.Service.Database)
+	return writer.Record(ctx, audit.FromRequest(r, principal.ID), action, "evidence_item", evidenceID, before, after)
 }
 
 // upload 接收证据登记请求，按内容类型区分附件上传与人工说明。
@@ -230,7 +234,10 @@ func (h *Handler) uploadWithFile(w http.ResponseWriter, r *http.Request, deliver
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "evidence.upload", item.ID, nil, item)
+	if err := h.recordAudit(r.Context(), r, principal, "evidence.upload", item.ID, nil, item); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, CreateEvidenceResponse{Evidence: views.FromEvidence(item)})
 }
 

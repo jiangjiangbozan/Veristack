@@ -2,6 +2,7 @@
 package integration
 
 import (
+	"context"
 	"io"
 	"net/http"
 
@@ -85,7 +86,10 @@ func (h *Handler) analyzeChangeImpact(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "integration.ai.change_impact", suggestion.ID, nil, suggestion)
+	if err := h.recordAudit(r.Context(), r, principal, "integration.ai.change_impact", suggestion.ID, nil, suggestion); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, AnalyzeChangeImpactResponse{Suggestion: toSuggestionView(suggestion)})
 }
 
@@ -100,7 +104,10 @@ func (h *Handler) applySuggestion(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "integration.ai.apply", suggestion.ID, nil, suggestion)
+	if err := h.recordAudit(r.Context(), r, principal, "integration.ai.apply", suggestion.ID, nil, suggestion); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, toSuggestionView(suggestion))
 }
 
@@ -115,7 +122,10 @@ func (h *Handler) dismissSuggestion(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "integration.ai.dismiss", suggestion.ID, nil, suggestion)
+	if err := h.recordAudit(r.Context(), r, principal, "integration.ai.dismiss", suggestion.ID, nil, suggestion); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, toSuggestionView(suggestion))
 }
 
@@ -135,7 +145,10 @@ func (h *Handler) extractRequirements(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "integration.ai.extract", suggestion.ID, nil, suggestion)
+	if err := h.recordAudit(r.Context(), r, principal, "integration.ai.extract", suggestion.ID, nil, suggestion); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, ExtractRequirementsResponse{Suggestion: toSuggestionView(suggestion)})
 }
 
@@ -165,7 +178,10 @@ func (h *Handler) generateSummary(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "integration.ai.summary", suggestion.ID, nil, suggestion)
+	if err := h.recordAudit(r.Context(), r, principal, "integration.ai.summary", suggestion.ID, nil, suggestion); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, GenerateSummaryResponse{Suggestion: toSuggestionView(suggestion)})
 }
 
@@ -185,7 +201,10 @@ func (h *Handler) importCIReport(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "integration.ci.import", report.ID, nil, report)
+	if err := h.recordAudit(r.Context(), r, principal, "integration.ci.import", report.ID, nil, report); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, ImportCIReportResponse{
 		Report:  CIReportView{BuildNo: req.BuildNo, CreatedAt: dbutil.TimeString(report.CreatedAt), ID: report.ID.String(), Provider: report.Provider},
 		Summary: TestSummaryView{DurationMs: summary.TotalDuration().Milliseconds(), Failed: summary.Failed, Passed: summary.Passed, Skipped: summary.Skipped, Total: summary.Total},
@@ -319,9 +338,9 @@ func (h *Handler) receive(w http.ResponseWriter, r *http.Request) {
 }
 
 // recordAudit 记录集成写操作的审计事件。
-func (h *Handler) recordAudit(r *http.Request, principal access.Principal, action string, objectID uuid.UUID, before, after any) {
-	writer := audit.Writer{Queries: db.New(h.Service.Database)}
-	_ = writer.Record(r.Context(), audit.FromRequest(r, principal.ID), action, "integration", objectID, before, after)
+func (h *Handler) recordAudit(ctx context.Context, r *http.Request, principal access.Principal, action string, objectID uuid.UUID, before, after any) error {
+	writer := audit.WriterFor(ctx, h.Service.Database)
+	return writer.Record(ctx, audit.FromRequest(r, principal.ID), action, "integration", objectID, before, after)
 }
 
 // resolveProject 解析路径中的项目 ID 并校验组织归属。

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"api/internal/platform/auth"
+	"api/internal/platform/database"
 	"api/internal/platform/db"
 	"api/internal/platform/errs"
 )
@@ -23,12 +24,7 @@ type Service struct {
 
 // Register 在同一事务中创建组织与 owner 用户，避免留下无用户的空组织。
 func (s *Service) Register(ctx context.Context, req RegisterRequest) (db.User, string, error) {
-	tx, err := s.Database.Begin(ctx)
-	if err != nil {
-		return db.User{}, "", fmt.Errorf("开启注册事务失败: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	queries := db.New(tx)
+	queries := database.Queries(ctx, s.Database)
 	organization, err := queries.CreateOrganization(ctx, req.OrganizationName)
 	if err != nil {
 		return db.User{}, "", fmt.Errorf("创建组织失败: %w", err)
@@ -47,9 +43,6 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (db.User, s
 	if err != nil {
 		return db.User{}, "", fmt.Errorf("创建用户失败: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return db.User{}, "", fmt.Errorf("提交注册事务失败: %w", err)
-	}
 	token, err := s.Auth.Generate(user.ID.String(), user.Role)
 	if err != nil {
 		return db.User{}, "", fmt.Errorf("签发令牌失败: %w", err)
@@ -59,7 +52,7 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (db.User, s
 
 // Login 校验邮箱与密码，成功时签发访问令牌。
 func (s *Service) Login(ctx context.Context, req LoginRequest) (db.User, string, error) {
-	user, err := db.New(s.Database).GetUserByEmail(ctx, req.Email)
+	user, err := database.Queries(ctx, s.Database).GetUserByEmail(ctx, req.Email)
 	if err != nil {
 		return db.User{}, "", errs.Unauthorized("邮箱或密码错误", err)
 	}
@@ -75,5 +68,5 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (db.User, string,
 
 // GetUser 按 ID 读取当前用户，供 /auth/me 接口使用。
 func (s *Service) GetUser(ctx context.Context, id uuid.UUID) (db.User, error) {
-	return db.New(s.Database).GetUserByID(ctx, id)
+	return database.Queries(ctx, s.Database).GetUserByID(ctx, id)
 }

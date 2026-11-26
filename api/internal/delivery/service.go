@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"api/internal/platform/database"
 	"api/internal/platform/datetime"
 	"api/internal/platform/db"
 	"api/internal/platform/dbutil"
@@ -36,12 +37,12 @@ type Service struct {
 
 // CountByProject 统计项目交付版本总数。
 func (s *Service) CountByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
-	return db.New(s.Database).CountDeliveriesByProject(ctx, projectID)
+	return database.Queries(ctx, s.Database).CountDeliveriesByProject(ctx, projectID)
 }
 
 // Create 创建交付版本，并把基线需求冻结为不可覆盖的交付清单。
 func (s *Service) Create(ctx context.Context, projectID uuid.UUID, req CreateDeliveryRequest) (db.Delivery, error) {
-	queries := db.New(s.Database)
+	queries := database.Queries(ctx, s.Database)
 	project, err := queries.GetProject(ctx, projectID)
 	if err != nil {
 		return db.Delivery{}, errs.NotFound("项目不存在", err)
@@ -77,7 +78,7 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, req CreateDel
 
 // Get 按 ID 读取交付版本。
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (db.Delivery, error) {
-	delivery, err := db.New(s.Database).GetDelivery(ctx, id)
+	delivery, err := database.Queries(ctx, s.Database).GetDelivery(ctx, id)
 	if err != nil {
 		return db.Delivery{}, errs.NotFound("交付版本不存在", err)
 	}
@@ -99,7 +100,7 @@ func (s *Service) GetManifest(ctx context.Context, id uuid.UUID) (Manifest, erro
 
 // List 分页列出项目交付版本。
 func (s *Service) List(ctx context.Context, projectID uuid.UUID, limit, offset int32) ([]db.Delivery, error) {
-	return db.New(s.Database).ListDeliveriesByProject(ctx, db.ListDeliveriesByProjectParams{
+	return database.Queries(ctx, s.Database).ListDeliveriesByProject(ctx, db.ListDeliveriesByProjectParams{
 		Limit:     limit,
 		Offset:    offset,
 		ProjectID: projectID,
@@ -108,7 +109,7 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, limit, offset i
 
 // Submit 把草稿交付提交为待验收状态。
 func (s *Service) Submit(ctx context.Context, id uuid.UUID) (db.Delivery, error) {
-	delivery, err := db.New(s.Database).SubmitDelivery(ctx, id)
+	delivery, err := database.Queries(ctx, s.Database).SubmitDelivery(ctx, id)
 	if err != nil {
 		return db.Delivery{}, errs.BadRequest("仅草稿状态的交付可以提交验收", err)
 	}
@@ -117,7 +118,7 @@ func (s *Service) Submit(ctx context.Context, id uuid.UUID) (db.Delivery, error)
 
 // UpdateStatus 更新交付验收状态。
 func (s *Service) UpdateStatus(ctx context.Context, id uuid.UUID, status string) (db.Delivery, error) {
-	delivery, err := db.New(s.Database).UpdateDeliveryStatus(ctx, db.UpdateDeliveryStatusParams{
+	delivery, err := database.Queries(ctx, s.Database).UpdateDeliveryStatus(ctx, db.UpdateDeliveryStatusParams{
 		ID:     id,
 		Status: status,
 	})
@@ -168,19 +169,40 @@ func hashManifest(snapshot []byte) string {
 }
 
 // ExportPack 把交付版本与其证据打包为 Evidence Pack，便于外部独立核验。
-func (s *Service) ExportPack(ctx context.Context, id uuid.UUID, privateKey ed25519.PrivateKey) (string, string, bool, error) {
+//
+// 每次导出分配独立目录，写入临时目录校验通过后再原子发布，
+// 保证历史导出不会被覆盖，与「证据快照不可覆盖」的产品设计一致。
+func (s *Service) ExportPack(ctx context.Context, id uuid.UUID, privateKey ed25519.PrivateKey, organizationID uuid.UUID) (string, string, bool, error) {
 	delivery, err := s.Get(ctx, id)
 	if err != nil {
 		return "", "", false, err
 	}
-	items, err := db.New(s.Database).ListEvidenceByDelivery(ctx, dbutil.NullableUUID(id))
+	items, err := database.Queries(ctx, s.Database).ListEvidenceByDelivery(ctx, dbutil.NullableUUID(id))
 	if err != nil {
 		return "", "", false, fmt.Errorf("查询交付证据失败: %w", err)
 	}
-	root := filepath.Join(s.PackRoot, delivery.ID.String())
-	if err := os.RemoveAll(root); err != nil {
-		return "", "", false, fmt.Errorf("清理旧的 Pack 目录失败: %w", err)
+	exportID := uuid.New().String()
+	finalRoot := filepath.Join(s.PackRoot, delivery.ID.String(), exportID)
+	stagingRoot := finalRoot + ".staging"
+	if err := os.MkdirAll(stagingRoot, 0o750); err != nil {
+		return "", "", false, fmt.Errorf("创建 Pack 临时目录失败: %w", err)
 	}
+	defer os.RemoveAll(stagingRoot)
+	meta, err := s.buildPack(ctx, stagingRoot, delivery, items, privateKey, organizationID)
+	if err != nil {
+		return "", "", false, err
+	}
+	if err := os.MkdirAll(filepath.Dir(finalRoot), 0o750); err != nil {
+		return "", "", false, fmt.Errorf("创建 Pack 目录失败: %w", err)
+	}
+	if err := os.Rename(stagingRoot, finalRoot); err != nil {
+		return "", "", false, fmt.Errorf("发布 Pack 目录失败: %w", err)
+	}
+	return finalRoot, meta.Manifest.SHA256, meta.Signature != nil, nil
+}
+
+// buildPack 组装 Pack 内容并写入元数据，附件从对象存储复制进 Pack。
+func (s *Service) buildPack(ctx context.Context, root string, delivery db.Delivery, items []db.EvidenceItem, privateKey ed25519.PrivateKey, organizationID uuid.UUID) (pack.Pack, error) {
 	builder := pack.NewBuilder(root)
 	for _, item := range items {
 		fileKey := item.FileKey.String
@@ -192,12 +214,12 @@ func (s *Service) ExportPack(ctx context.Context, id uuid.UUID, privateKey ed255
 			continue
 		}
 		if _, err := builder.AddFile(item.ID.String(), item.Title, sourcePath); err != nil {
-			return "", "", false, err
+			return pack.Pack{}, err
 		}
 	}
 	manifestSHA, err := builder.WriteManifest(delivery.ManifestJson)
 	if err != nil {
-		return "", "", false, err
+		return pack.Pack{}, err
 	}
 	meta := pack.Pack{
 		SchemaVersion: pack.SchemaVersion,
@@ -210,25 +232,29 @@ func (s *Service) ExportPack(ctx context.Context, id uuid.UUID, privateKey ed255
 			ProjectName:     s.projectName(ctx, delivery.ProjectID),
 			Version:         delivery.Version,
 		},
-		ManifestSHA: manifestSHA,
-		Files:       builder.Files(),
+		Manifest: pack.ManifestRef{Path: pack.ManifestFileName, SHA256: manifestSHA},
+		Files:    builder.Files(),
+		Issuer: pack.Issuer{
+			KeyID:          pack.KeyID(privateKey.Public().(ed25519.PublicKey)),
+			OrganizationID: organizationID.String(),
+		},
 	}
 	if len(privateKey) == ed25519.PrivateKeySize {
-		signature, err := pack.Sign(manifestSHA, privateKey)
+		signature, err := pack.Sign(meta, privateKey)
 		if err != nil {
-			return "", "", false, err
+			return pack.Pack{}, err
 		}
 		meta.Signature = signature
 	}
 	if err := builder.Write(meta); err != nil {
-		return "", "", false, err
+		return pack.Pack{}, err
 	}
-	return root, manifestSHA, meta.Signature != nil, nil
+	return meta, nil
 }
 
 // projectName 读取项目名称，读取失败时返回空串。
 func (s *Service) projectName(ctx context.Context, projectID uuid.UUID) string {
-	project, err := db.New(s.Database).GetProject(ctx, projectID)
+	project, err := database.Queries(ctx, s.Database).GetProject(ctx, projectID)
 	if err != nil {
 		return ""
 	}

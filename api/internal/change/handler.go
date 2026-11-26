@@ -2,6 +2,7 @@
 package change
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -59,7 +60,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "change.create", changeRequest.ID, nil, changeRequest)
+	if err := h.recordAudit(r.Context(), r, principal, "change.create", changeRequest.ID, nil, changeRequest); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, CreateChangeRequestResponse{ChangeRequest: views.FromChangeRequest(changeRequest)})
 }
 
@@ -103,7 +107,10 @@ func (h *Handler) decide(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "change.decision", changeID, changeRequest, decided)
+	if err := h.recordAudit(r.Context(), r, principal, "change.decision", changeID, changeRequest, decided); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, buildDecisionResponse(decided, baseline))
 }
 
@@ -185,9 +192,9 @@ func (h *Handler) principal(r *http.Request) (access.Principal, *db.Queries, err
 }
 
 // recordAudit 记录变更写操作的审计事件。
-func (h *Handler) recordAudit(r *http.Request, principal access.Principal, action string, changeID uuid.UUID, before, after any) {
-	writer := audit.Writer{Queries: db.New(h.Service.Database)}
-	_ = writer.Record(r.Context(), audit.FromRequest(r, principal.ID), action, "change_request", changeID, before, after)
+func (h *Handler) recordAudit(ctx context.Context, r *http.Request, principal access.Principal, action string, changeID uuid.UUID, before, after any) error {
+	writer := audit.WriterFor(ctx, h.Service.Database)
+	return writer.Record(ctx, audit.FromRequest(r, principal.ID), action, "change_request", changeID, before, after)
 }
 
 // buildDecisionResponse 构造变更决定响应，批准时附上新基线。

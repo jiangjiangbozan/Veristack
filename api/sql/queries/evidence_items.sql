@@ -1,7 +1,8 @@
 -- name: CreateEvidenceItem :one
 -- 记录一条证据，文件证据保存对象键与内容摘要。
-INSERT INTO evidence_items (project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, note, occurred_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+-- 提交指纹用于保证 Webhook 幂等：同一项目内重复指纹会被唯一约束拒绝。
+INSERT INTO evidence_items (project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, note, occurred_at, source_fingerprint)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, sqlc.narg('source_fingerprint')::text)
 RETURNING *;
 
 -- name: GetEvidenceItem :one
@@ -36,4 +37,9 @@ RETURNING *;
 -- 统计项目证据总数。
 SELECT count(*) FROM evidence_items
 WHERE project_id = $1 AND deleted_at IS NULL;
+
+-- name: GetEvidenceByFingerprint :one
+-- 按提交指纹读取证据，用于判断 Webhook 是否重复投递。
+SELECT * FROM evidence_items
+WHERE project_id = $1 AND source_fingerprint = $2 AND deleted_at IS NULL;
 

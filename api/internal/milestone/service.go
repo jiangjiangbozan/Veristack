@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"api/internal/platform/database"
 	"api/internal/platform/db"
 	"api/internal/platform/dbutil"
 	"api/internal/platform/errs"
@@ -28,7 +29,7 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, req CreateMil
 	if err != nil {
 		return db.Milestone{}, err
 	}
-	milestone, err := db.New(s.Database).CreateMilestone(ctx, db.CreateMilestoneParams{
+	milestone, err := database.Queries(ctx, s.Database).CreateMilestone(ctx, db.CreateMilestoneParams{
 		Name:           req.Name,
 		ProjectID:      projectID,
 		RequirementIds: requirementIDs,
@@ -42,7 +43,7 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, req CreateMil
 
 // Get 按 ID 读取里程碑。
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (db.Milestone, error) {
-	milestone, err := db.New(s.Database).GetMilestone(ctx, id)
+	milestone, err := database.Queries(ctx, s.Database).GetMilestone(ctx, id)
 	if err != nil {
 		return db.Milestone{}, errs.NotFound("里程碑不存在", err)
 	}
@@ -51,12 +52,12 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (db.Milestone, error) {
 
 // List 列出项目全部里程碑。
 func (s *Service) List(ctx context.Context, projectID uuid.UUID) ([]db.Milestone, error) {
-	return db.New(s.Database).ListMilestonesByProject(ctx, projectID)
+	return database.Queries(ctx, s.Database).ListMilestonesByProject(ctx, projectID)
 }
 
 // SoftDelete 软删除里程碑。
 func (s *Service) SoftDelete(ctx context.Context, id uuid.UUID) error {
-	return db.New(s.Database).SoftDeleteMilestone(ctx, id)
+	return database.Queries(ctx, s.Database).SoftDeleteMilestone(ctx, id)
 }
 
 // Update 更新里程碑字段。
@@ -69,7 +70,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, req UpdateMilestoneR
 	if err != nil {
 		return db.Milestone{}, err
 	}
-	milestone, err := db.New(s.Database).UpdateMilestone(ctx, db.UpdateMilestoneParams{
+	milestone, err := database.Queries(ctx, s.Database).UpdateMilestone(ctx, db.UpdateMilestoneParams{
 		ID:             id,
 		Name:           req.Name,
 		RequirementIds: requirementIDs,

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"api/internal/platform/datetime"
@@ -115,7 +116,20 @@ func (w *Worker) handlePush(ctx context.Context, task db.OutboxTask) error {
 }
 
 // recordCommitEvidence 把一次提交登记为 Git 提交类型的证据。
+//
+// 以提交哈希作为指纹，同一 Webhook 重复投递时会被唯一约束拒绝，保证幂等。
 func (w *Worker) recordCommitEvidence(ctx context.Context, projectID uuid.UUID, commit pushCommit) error {
+	if commit.Hash == "" {
+		return fmt.Errorf("提交缺少哈希，无法保证幂等")
+	}
+	existing, err := db.New(w.Database).GetEvidenceByFingerprint(ctx, db.GetEvidenceByFingerprintParams{
+		ProjectID:         projectID,
+		SourceFingerprint: pgtype.Text{String: commit.Hash, Valid: true},
+	})
+	if err == nil {
+		w.Logger.Debug("跳过重复的提交证据", "commit", shortHash(commit.Hash), "evidenceId", existing.ID)
+		return nil
+	}
 	requirementID, err := w.resolveRequirement(ctx, projectID, commit.Message)
 	if err != nil {
 		return err
@@ -125,14 +139,15 @@ func (w *Worker) recordCommitEvidence(ctx context.Context, projectID uuid.UUID, 
 		note = note[:maxNoteLength]
 	}
 	params := db.CreateEvidenceItemParams{
-		DeliveryID:    dbutil.NullableUUID(emptyUUID),
-		Note:          dbutil.TextFromString(note),
-		OccurredAt:    datetime.Now(),
-		ProjectID:     projectID,
-		RequirementID: dbutil.NullableUUID(requirementID),
-		Source:        dbutil.TextFromString(commit.Author),
-		Title:         fmt.Sprintf("提交 %s", shortHash(commit.Hash)),
-		Type:          "git_commit",
+		DeliveryID:        dbutil.NullableUUID(emptyUUID),
+		Note:              dbutil.TextFromString(note),
+		OccurredAt:        datetime.Now(),
+		ProjectID:         projectID,
+		RequirementID:     dbutil.NullableUUID(requirementID),
+		Source:            dbutil.TextFromString(commit.Author),
+		SourceFingerprint: pgtype.Text{String: commit.Hash, Valid: true},
+		Title:             fmt.Sprintf("提交 %s", shortHash(commit.Hash)),
+		Type:              "git_commit",
 	}
 	if _, err := db.New(w.Database).CreateEvidenceItem(ctx, params); err != nil {
 		return fmt.Errorf("登记提交证据失败: %w", err)

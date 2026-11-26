@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"api/internal/platform/database"
 	"api/internal/platform/db"
 )
 
@@ -33,13 +36,22 @@ type Writer struct {
 	Queries *db.Queries
 }
 
+// WriterFor 构造绑定到当前请求事务的审计写入器。
+//
+// 审计写入与业务写入共享同一事务，审计失败会使业务变更一并回滚。
+func WriterFor(ctx context.Context, pool *pgxpool.Pool) *Writer {
+	return &Writer{Queries: database.Queries(ctx, pool)}
+}
+
 // Record 追加一条审计事件，变更前后以 JSONB 保存。
+//
+// 写入前会对敏感字段做脱敏，避免令牌、密码等机密随审计落库。
 func (w *Writer) Record(ctx context.Context, actor Actor, action, objectType string, objectID uuid.UUID, before, after any) error {
-	beforeJSON, err := json.Marshal(before)
+	beforeJSON, err := marshalRedacted(before)
 	if err != nil {
 		return err
 	}
-	afterJSON, err := json.Marshal(after)
+	afterJSON, err := marshalRedacted(after)
 	if err != nil {
 		return err
 	}
@@ -60,4 +72,72 @@ func uuidToPgtype(id uuid.UUID) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return pgtype.UUID{Bytes: id, Valid: true}
+}
+
+// marshalRedacted 序列化审计载荷，并把敏感字段替换为占位符。
+func marshalRedacted(payload any) ([]byte, error) {
+	if payload == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, err
+	}
+	return json.Marshal(redactValue(decoded))
+}
+
+// redactValue 递归遍历载荷，把敏感键的值替换为占位符。
+func redactValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(typed))
+		for key, item := range typed {
+			if isSensitiveKey(key) {
+				result[key] = redactedPlaceholder
+				continue
+			}
+			result[key] = redactValue(item)
+		}
+		return result
+	case []any:
+		result := make([]any, 0, len(typed))
+		for _, item := range typed {
+			result = append(result, redactValue(item))
+		}
+		return result
+	default:
+		return value
+	}
+}
+
+// redactedPlaceholder 是脱敏后替换敏感字段的占位符。
+const redactedPlaceholder = "[redacted]"
+
+// sensitiveKeyFragments 是需要脱敏的字段名片段，命中即替换整个值。
+var sensitiveKeyFragments = []string{
+	"accesstoken",
+	"apikey",
+	"authorization",
+	"credential",
+	"password",
+	"privatekey",
+	"refreshtoken",
+	"secret",
+	"signature",
+	"token",
+}
+
+// isSensitiveKey 判断字段名是否属于敏感字段。
+func isSensitiveKey(key string) bool {
+	normalized := strings.ToLower(key)
+	for _, fragment := range sensitiveKeyFragments {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
+	}
+	return false
 }

@@ -11,6 +11,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AcceptanceIdentity struct {
+	ID         uuid.UUID          `json:"id"`
+	DeliveryID uuid.UUID          `json:"delivery_id"`
+	Email      string             `json:"email"`
+	Verified   bool               `json:"verified"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	VerifiedAt pgtype.Timestamptz `json:"verified_at"`
+	CreatedAt  time.Time          `json:"created_at"`
+}
+
 type AcceptanceVerdict struct {
 	ID               uuid.UUID   `json:"id"`
 	DeliveryID       uuid.UUID   `json:"delivery_id"`
@@ -109,20 +119,31 @@ type Delivery struct {
 	ManifestJson    []byte             `json:"manifest_json"`
 }
 
+type EmailVerificationCode struct {
+	ID         uuid.UUID          `json:"id"`
+	Email      string             `json:"email"`
+	CodeHash   string             `json:"code_hash"`
+	Attempts   int32              `json:"attempts"`
+	ExpiresAt  time.Time          `json:"expires_at"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt  time.Time          `json:"created_at"`
+}
+
 type EvidenceItem struct {
-	ID            uuid.UUID          `json:"id"`
-	ProjectID     uuid.UUID          `json:"project_id"`
-	DeliveryID    pgtype.UUID        `json:"delivery_id"`
-	RequirementID pgtype.UUID        `json:"requirement_id"`
-	Type          string             `json:"type"`
-	Title         string             `json:"title"`
-	FileKey       pgtype.Text        `json:"file_key"`
-	Sha256        pgtype.Text        `json:"sha256"`
-	Source        pgtype.Text        `json:"source"`
-	OccurredAt    time.Time          `json:"occurred_at"`
-	CreatedAt     time.Time          `json:"created_at"`
-	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
-	Note          pgtype.Text        `json:"note"`
+	ID                uuid.UUID          `json:"id"`
+	ProjectID         uuid.UUID          `json:"project_id"`
+	DeliveryID        pgtype.UUID        `json:"delivery_id"`
+	RequirementID     pgtype.UUID        `json:"requirement_id"`
+	Type              string             `json:"type"`
+	Title             string             `json:"title"`
+	FileKey           pgtype.Text        `json:"file_key"`
+	Sha256            pgtype.Text        `json:"sha256"`
+	Source            pgtype.Text        `json:"source"`
+	OccurredAt        time.Time          `json:"occurred_at"`
+	CreatedAt         time.Time          `json:"created_at"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	Note              pgtype.Text        `json:"note"`
+	SourceFingerprint pgtype.Text        `json:"source_fingerprint"`
 }
 
 type Milestone struct {
@@ -234,16 +255,17 @@ type ShareToken struct {
 }
 
 type User struct {
-	ID             uuid.UUID          `json:"id"`
-	OrganizationID uuid.UUID          `json:"organization_id"`
-	Email          string             `json:"email"`
-	PasswordHash   string             `json:"password_hash"`
-	DisplayName    string             `json:"display_name"`
-	Role           string             `json:"role"`
-	Status         string             `json:"status"`
-	CreatedAt      time.Time          `json:"created_at"`
-	UpdatedAt      time.Time          `json:"updated_at"`
-	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+	ID              uuid.UUID          `json:"id"`
+	OrganizationID  uuid.UUID          `json:"organization_id"`
+	Email           string             `json:"email"`
+	PasswordHash    string             `json:"password_hash"`
+	DisplayName     string             `json:"display_name"`
+	Role            string             `json:"role"`
+	Status          string             `json:"status"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	EmailVerifiedAt pgtype.Timestamptz `json:"email_verified_at"`
 }
 
 type Webhook struct {

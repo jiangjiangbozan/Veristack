@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -66,13 +67,17 @@ func main() {
 		panic(err)
 	}
 	defer pool.Close()
+	signingKey, err := loadSigningKey(cfg, log)
+	if err != nil {
+		panic(err)
+	}
 	state := &AppState{
 		Auth:       auth.NewManager(cfg.Auth.Secret, cfg.Auth.ExpiresIn),
 		Config:     cfg,
 		DB:         pool,
 		Logger:     log,
 		Model:      buildModel(cfg),
-		SigningKey: loadSigningKey(cfg, log),
+		SigningKey: signingKey,
 		Storage:    &storage.LocalStore{Root: cfg.Storage.LocalRoot},
 	}
 	workerCtx, stopWorker := context.WithCancel(ctx)
@@ -91,22 +96,23 @@ func buildModel(cfg *config.Config) ai.Model {
 	return ai.NewOpenAICompatible(cfg.AI)
 }
 
-// loadSigningKey 读取交付清单签名私钥，未配置或读取失败时返回空值表示不签名。
-func loadSigningKey(cfg *config.Config, log *slog.Logger) ed25519.PrivateKey {
+// loadSigningKey 读取交付清单签名私钥。
+//
+// 采用 Fail Closed 原则：配置了私钥路径就必须加载成功，否则服务拒绝启动。
+// 静默降级为不签名会让开发者误以为交付证据可核验，实际却无法验证来源。
+func loadSigningKey(cfg *config.Config, log *slog.Logger) (ed25519.PrivateKey, error) {
 	if cfg.Signing.PrivateKeyPath == "" {
 		log.Info("未配置签名私钥，导出的 Evidence Pack 不带签名")
-		return nil
+		return nil, nil
 	}
 	content, err := os.ReadFile(cfg.Signing.PrivateKeyPath)
 	if err != nil {
-		log.Error("读取签名私钥失败，导出的 Evidence Pack 不带签名", "error", err)
-		return nil
+		return nil, fmt.Errorf("读取签名私钥失败: %w", err)
 	}
 	if len(content) != ed25519.PrivateKeySize {
-		log.Error("签名私钥长度不合法，导出的 Evidence Pack 不带签名")
-		return nil
+		return nil, fmt.Errorf("签名私钥长度不合法，期望 %d 字节，实际 %d 字节", ed25519.PrivateKeySize, len(content))
 	}
-	return ed25519.PrivateKey(content)
+	return ed25519.PrivateKey(content), nil
 }
 
 // healthCheck 返回服务存活状态，供容器编排与部署检查使用。
@@ -130,12 +136,15 @@ func newHTTPServer(cfg *config.Config, state *AppState) *http.Server {
 	router.Use(chiMiddleware.RequestID)
 	router.Use(chiMiddleware.RealIP)
 	router.Use(chiMiddleware.Recoverer)
+	// 写请求统一开启请求级事务，业务写入与审计写入落在同一事务里。
+	router.Use(database.Middleware(state.DB))
 	router.Get(healthPath, healthCheck)
 	router.Route(apiPrefix, func(r chi.Router) {
 		publicIdentity := identity.Handler{Service: &identity.Service{Auth: state.Auth, Database: state.DB}}
 		publicIdentity.Routes(r)
 		acceptanceHandler := &acceptance.Handler{
 			EvidenceService: &evidence.Service{Database: state.DB, Storage: state.Storage},
+			Identity:        &acceptance.CustomerIdentityService{Database: state.DB, Mailer: buildMailer(cfg)},
 			Service:         &acceptance.Service{Database: state.DB},
 		}
 		acceptanceHandler.PortalRoutes(r)
@@ -220,4 +229,12 @@ func waitForShutdown(server *http.Server, log *slog.Logger) {
 		log.Error("优雅关闭失败", "error", err)
 	}
 	log.Info("服务已关闭")
+}
+
+// buildMailer 依据配置选择邮件发送方式，未配置 SMTP 时退化为日志输出。
+func buildMailer(cfg *config.Config) acceptance.Mailer {
+	if cfg.SMTP.Host == "" {
+		return acceptance.LogMailer{}
+	}
+	return acceptance.NewSMTPMailer(cfg.SMTP)
 }

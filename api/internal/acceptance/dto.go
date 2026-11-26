@@ -17,6 +17,27 @@ type CreateShareTokenResponse struct {
 	URL       string `json:"url"`       // 客户门户地址
 }
 
+// RequestVerificationCodeRequest 是客户申请邮箱验证码的请求体。
+type RequestVerificationCodeRequest struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+// RequestVerificationCodeResponse 是验证码申请响应。
+type RequestVerificationCodeResponse struct {
+	Sent bool `json:"sent"` // 是否已发送
+}
+
+// VerifyCustomerRequest 是客户提交验证码的请求体。
+type VerifyCustomerRequest struct {
+	Code  string `json:"code" validate:"required,len=6"`
+	Email string `json:"email" validate:"required,email"`
+}
+
+// VerifyCustomerResponse 是邮箱验证结果响应。
+type VerifyCustomerResponse struct {
+	Verified bool `json:"verified"` // 是否已验证
+}
+
 // SaveVerdictRequest 是保存单条验收裁定结果的请求体。
 type SaveVerdictRequest struct {
 	Comment string `json:"comment" validate:"max=1000"`

@@ -2,6 +2,7 @@
 package delivery
 
 import (
+	"context"
 	"crypto/ed25519"
 	"net/http"
 
@@ -58,7 +59,7 @@ func (h *Handler) exportPack(w http.ResponseWriter, r *http.Request) {
 	if err := h.ensureDelivery(w, r, delivery, principal); err != nil {
 		return
 	}
-	root, manifestSHA, signed, err := h.Service.ExportPack(r.Context(), deliveryID, h.SigningKey)
+	root, manifestSHA, signed, err := h.Service.ExportPack(r.Context(), deliveryID, h.SigningKey, principal.OrganizationID)
 	if err != nil {
 		response.Fail(w, err)
 		return
@@ -96,7 +97,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "delivery.create", delivery.ID, nil, delivery)
+	if err := h.recordAudit(r.Context(), r, principal, "delivery.create", delivery.ID, nil, delivery); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, CreateDeliveryResponse{Delivery: views.FromDelivery(delivery)})
 }
 
@@ -220,9 +224,9 @@ func (h *Handler) principal(r *http.Request) (access.Principal, *db.Queries, err
 }
 
 // recordAudit 记录交付写操作的审计事件。
-func (h *Handler) recordAudit(r *http.Request, principal access.Principal, action string, deliveryID uuid.UUID, before, after any) {
-	writer := audit.Writer{Queries: db.New(h.Service.Database)}
-	_ = writer.Record(r.Context(), audit.FromRequest(r, principal.ID), action, "delivery", deliveryID, before, after)
+func (h *Handler) recordAudit(ctx context.Context, r *http.Request, principal access.Principal, action string, deliveryID uuid.UUID, before, after any) error {
+	writer := audit.WriterFor(ctx, h.Service.Database)
+	return writer.Record(ctx, audit.FromRequest(r, principal.ID), action, "delivery", deliveryID, before, after)
 }
 
 // submit 把草稿交付提交为待验收状态。
@@ -250,6 +254,9 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "delivery.submit", deliveryID, before, delivery)
+	if err := h.recordAudit(r.Context(), r, principal, "delivery.submit", deliveryID, before, delivery); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, SubmitDeliveryResponse{Delivery: views.FromDelivery(delivery)})
 }

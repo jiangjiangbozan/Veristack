@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"api/internal/platform/database"
 	"api/internal/platform/db"
 	"api/internal/platform/dbutil"
 	"api/internal/platform/errs"
@@ -29,7 +30,7 @@ type Service struct {
 
 // Create 基于项目最新基线创建变更申请，并保存拟议的需求快照。
 func (s *Service) Create(ctx context.Context, projectID, requesterID uuid.UUID, req CreateChangeRequestRequest) (db.ChangeRequest, error) {
-	queries := db.New(s.Database)
+	queries := database.Queries(ctx, s.Database)
 	baseline, err := queries.GetLatestBaseline(ctx, projectID)
 	if err != nil {
 		return db.ChangeRequest{}, errs.NotFound("项目尚无需求基线", err)
@@ -65,12 +66,12 @@ func (s *Service) Create(ctx context.Context, projectID, requesterID uuid.UUID, 
 
 // CountByProject 统计项目变更申请总数。
 func (s *Service) CountByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
-	return db.New(s.Database).CountChangeRequestsByProject(ctx, projectID)
+	return database.Queries(ctx, s.Database).CountChangeRequestsByProject(ctx, projectID)
 }
 
 // Decide 记录客户决定，批准时在同一事务内生成新的基线版本。
 func (s *Service) Decide(ctx context.Context, changeID, decidedBy uuid.UUID, req DecisionRequest) (db.ChangeRequest, *db.ScopeBaseline, error) {
-	queries := db.New(s.Database)
+	queries := database.Queries(ctx, s.Database)
 	changeRequest, err := queries.GetChangeRequest(ctx, changeID)
 	if err != nil {
 		return db.ChangeRequest{}, nil, errs.NotFound("变更申请不存在", err)
@@ -103,7 +104,7 @@ func (s *Service) Decide(ctx context.Context, changeID, decidedBy uuid.UUID, req
 
 // Get 按 ID 读取变更申请。
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (db.ChangeRequest, error) {
-	changeRequest, err := db.New(s.Database).GetChangeRequest(ctx, id)
+	changeRequest, err := database.Queries(ctx, s.Database).GetChangeRequest(ctx, id)
 	if err != nil {
 		return db.ChangeRequest{}, errs.NotFound("变更申请不存在", err)
 	}
@@ -112,7 +113,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (db.ChangeRequest, erro
 
 // List 分页列出项目变更申请。
 func (s *Service) List(ctx context.Context, projectID uuid.UUID, limit, offset int32) ([]db.ChangeRequest, error) {
-	return db.New(s.Database).ListChangeRequestsByProject(ctx, db.ListChangeRequestsByProjectParams{
+	return database.Queries(ctx, s.Database).ListChangeRequestsByProject(ctx, db.ListChangeRequestsByProjectParams{
 		Limit:     limit,
 		Offset:    offset,
 		ProjectID: projectID,
@@ -149,9 +150,6 @@ func createBaselineFromSnapshot(ctx context.Context, pool *pgxpool.Pool, project
 	})
 	if err != nil {
 		return nil, fmt.Errorf("冻结变更基线失败: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("提交变更基线事务失败: %w", err)
 	}
 	return &frozen, nil
 }

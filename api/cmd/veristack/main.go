@@ -63,7 +63,7 @@ func runVerify(args []string) int {
 // printReport 以可读形式输出核验报告。
 func printReport(report pack.Report) {
 	fmt.Printf("交付：%s v%d（基线 v%d）\n", report.Pack.Delivery.ProjectName, report.Pack.Delivery.Version, report.Pack.Delivery.BaselineVersion)
-	fmt.Printf("清单摘要：%s\n", report.Pack.ManifestSHA)
+	fmt.Printf("清单摘要：%s\n", report.Pack.Manifest.SHA256)
 	if report.Pack.Delivery.GitRef != "" {
 		fmt.Printf("Git 提交：%s\n", report.Pack.Delivery.GitRef)
 	}

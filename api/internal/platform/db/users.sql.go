@@ -27,7 +27,7 @@ func (q *Queries) CountUsersByOrganization(ctx context.Context, organizationID u
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (organization_id, email, password_hash, display_name, role)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, organization_id, email, password_hash, display_name, role, status, created_at, updated_at, deleted_at
+RETURNING id, organization_id, email, password_hash, display_name, role, status, created_at, updated_at, deleted_at, email_verified_at
 `
 
 type CreateUserParams struct {
@@ -59,12 +59,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, organization_id, email, password_hash, display_name, role, status, created_at, updated_at, deleted_at FROM users
+SELECT id, organization_id, email, password_hash, display_name, role, status, created_at, updated_at, deleted_at, email_verified_at FROM users
 WHERE email = $1 AND deleted_at IS NULL
 LIMIT 1
 `
@@ -84,12 +85,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, organization_id, email, password_hash, display_name, role, status, created_at, updated_at, deleted_at FROM users
+SELECT id, organization_id, email, password_hash, display_name, role, status, created_at, updated_at, deleted_at, email_verified_at FROM users
 WHERE id = $1 AND deleted_at IS NULL
 LIMIT 1
 `
@@ -109,12 +111,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const listUsersByOrganization = `-- name: ListUsersByOrganization :many
-SELECT id, organization_id, email, password_hash, display_name, role, status, created_at, updated_at, deleted_at FROM users
+SELECT id, organization_id, email, password_hash, display_name, role, status, created_at, updated_at, deleted_at, email_verified_at FROM users
 WHERE organization_id = $1 AND deleted_at IS NULL
 ORDER BY display_name ASC
 LIMIT $2 OFFSET $3
@@ -147,6 +150,7 @@ func (q *Queries) ListUsersByOrganization(ctx context.Context, arg ListUsersByOr
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.EmailVerifiedAt,
 		); err != nil {
 			return nil, err
 		}

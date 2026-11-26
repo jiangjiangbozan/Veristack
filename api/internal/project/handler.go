@@ -2,6 +2,7 @@
 package project
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -86,7 +87,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "project.create", project.ID, nil, project)
+	if err := h.recordAudit(r.Context(), r, principal, "project.create", project.ID, nil, project); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, CreateProjectResponse{Project: views.FromProject(project)})
 }
 
@@ -206,9 +210,9 @@ func (h *Handler) principal(r *http.Request) (access.Principal, *db.Queries, err
 }
 
 // recordAudit 记录项目写操作的审计事件。
-func (h *Handler) recordAudit(r *http.Request, principal access.Principal, action string, projectID uuid.UUID, before, after any) {
-	writer := audit.Writer{Queries: db.New(h.Service.Database)}
-	_ = writer.Record(r.Context(), audit.FromRequest(r, principal.ID), action, "project", projectID, before, after)
+func (h *Handler) recordAudit(ctx context.Context, r *http.Request, principal access.Principal, action string, projectID uuid.UUID, before, after any) error {
+	writer := audit.WriterFor(ctx, h.Service.Database)
+	return writer.Record(ctx, audit.FromRequest(r, principal.ID), action, "project", projectID, before, after)
 }
 
 // remove 软删除项目，仅管理员可操作。
@@ -235,7 +239,10 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "project.delete", projectID, project, nil)
+	if err := h.recordAudit(r.Context(), r, principal, "project.delete", projectID, project, nil); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, map[string]bool{"deleted": true})
 }
 
@@ -295,7 +302,10 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "project.update", projectID, nil, project)
+	if err := h.recordAudit(r.Context(), r, principal, "project.update", projectID, nil, project); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, UpdateProjectResponse{Project: views.FromProject(project)})
 }
 

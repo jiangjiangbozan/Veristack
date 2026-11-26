@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"api/internal/platform/database"
 	"api/internal/platform/db"
 	"api/internal/platform/dbutil"
 	"api/internal/platform/errs"
@@ -22,7 +23,7 @@ type Service struct {
 
 // AddMember 把组织内用户添加为项目成员。
 func (s *Service) AddMember(ctx context.Context, projectID uuid.UUID, req AddMemberRequest, organizationID uuid.UUID) (db.User, error) {
-	queries := db.New(s.Database)
+	queries := database.Queries(ctx, s.Database)
 	user, err := queries.GetUserByEmail(ctx, req.Email)
 	if err != nil || user.OrganizationID != organizationID {
 		return db.User{}, errs.NotFound("用户不存在", err)
@@ -40,7 +41,7 @@ func (s *Service) AddMember(ctx context.Context, projectID uuid.UUID, req AddMem
 
 // CountByOrganization 统计组织下项目总数。
 func (s *Service) CountByOrganization(ctx context.Context, organizationID uuid.UUID) (int64, error) {
-	return db.New(s.Database).CountProjects(ctx, organizationID)
+	return database.Queries(ctx, s.Database).CountProjects(ctx, organizationID)
 }
 
 // Create 在项目所属组织下创建项目，并把创建人登记为 developer 成员。
@@ -53,12 +54,7 @@ func (s *Service) Create(ctx context.Context, organizationID uuid.UUID, actorID 
 	if err != nil {
 		return db.Project{}, errs.BadRequest(err.Error(), err)
 	}
-	tx, err := s.Database.Begin(ctx)
-	if err != nil {
-		return db.Project{}, fmt.Errorf("开启创建项目事务失败: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	queries := db.New(tx)
+	queries := database.Queries(ctx, s.Database)
 	project, err := queries.CreateProject(ctx, db.CreateProjectParams{
 		ClientName:     req.ClientName,
 		ContractNo:     dbutil.TextFromString(req.ContractNo),
@@ -78,15 +74,12 @@ func (s *Service) Create(ctx context.Context, organizationID uuid.UUID, actorID 
 	}); err != nil {
 		return db.Project{}, fmt.Errorf("登记项目成员失败: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return db.Project{}, fmt.Errorf("提交创建项目事务失败: %w", err)
-	}
 	return project, nil
 }
 
 // Get 按 ID 读取项目，不存在时返回 404。
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (db.Project, error) {
-	project, err := db.New(s.Database).GetProject(ctx, id)
+	project, err := database.Queries(ctx, s.Database).GetProject(ctx, id)
 	if err != nil {
 		return db.Project{}, errs.NotFound("项目不存在", err)
 	}
@@ -95,7 +88,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (db.Project, error) {
 
 // List 分页列出组织下项目。
 func (s *Service) List(ctx context.Context, organizationID uuid.UUID, limit, offset int32) ([]db.Project, error) {
-	return db.New(s.Database).ListProjects(ctx, db.ListProjectsParams{
+	return database.Queries(ctx, s.Database).ListProjects(ctx, db.ListProjectsParams{
 		Limit:          limit,
 		Offset:         offset,
 		OrganizationID: organizationID,
@@ -104,12 +97,12 @@ func (s *Service) List(ctx context.Context, organizationID uuid.UUID, limit, off
 
 // ListMembers 列出项目成员。
 func (s *Service) ListMembers(ctx context.Context, projectID uuid.UUID) ([]db.ListProjectMembersRow, error) {
-	return db.New(s.Database).ListProjectMembers(ctx, projectID)
+	return database.Queries(ctx, s.Database).ListProjectMembers(ctx, projectID)
 }
 
 // Overview 统计项目的基线、变更、里程碑与需求数量。
 func (s *Service) Overview(ctx context.Context, projectID uuid.UUID) (ProjectOverviewResponse, error) {
-	queries := db.New(s.Database)
+	queries := database.Queries(ctx, s.Database)
 	baselineCount, err := queries.CountScopeBaselines(ctx, projectID)
 	if err != nil {
 		return ProjectOverviewResponse{}, err
@@ -136,7 +129,7 @@ func (s *Service) Overview(ctx context.Context, projectID uuid.UUID) (ProjectOve
 
 // RemoveMember 从项目移除成员。
 func (s *Service) RemoveMember(ctx context.Context, projectID, userID uuid.UUID) error {
-	return db.New(s.Database).DeleteProjectMember(ctx, db.DeleteProjectMemberParams{
+	return database.Queries(ctx, s.Database).DeleteProjectMember(ctx, db.DeleteProjectMemberParams{
 		ProjectID: projectID,
 		UserID:    userID,
 	})
@@ -144,7 +137,7 @@ func (s *Service) RemoveMember(ctx context.Context, projectID, userID uuid.UUID)
 
 // SoftDelete 软删除项目。
 func (s *Service) SoftDelete(ctx context.Context, id uuid.UUID) error {
-	return db.New(s.Database).SoftDeleteProject(ctx, id)
+	return database.Queries(ctx, s.Database).SoftDeleteProject(ctx, id)
 }
 
 // Update 更新项目可编辑字段。
@@ -157,7 +150,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, req UpdateProjectReq
 	if err != nil {
 		return db.Project{}, errs.BadRequest(err.Error(), err)
 	}
-	return db.New(s.Database).UpdateProject(ctx, db.UpdateProjectParams{
+	return database.Queries(ctx, s.Database).UpdateProject(ctx, db.UpdateProjectParams{
 		Archived:    req.Archived,
 		ClientName:  req.ClientName,
 		ContractNo:  dbutil.TextFromString(req.ContractNo),

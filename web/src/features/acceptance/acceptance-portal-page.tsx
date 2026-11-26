@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/field'
+import { requestVerificationCode, verifyCustomerEmail } from '@/services/acceptance-service'
 import { fetchPortalDelivery, savePortalVerdict, submitPortalDecision } from '@/services/delivery-service'
 import { formatDateTime } from '@/shared/lib/datetime'
 import type { AcceptanceVerdict, ManifestCriterion } from '@/shared/types/delivery'
@@ -12,16 +13,22 @@ import type { AcceptanceVerdict, ManifestCriterion } from '@/shared/types/delive
 /** 客户验收门户页面，供客户通过分享链接逐条验收并给出结论。 */
 export function AcceptancePortalPage({ token }: { token: string }) {
   const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [isVerified, setIsVerified] = useState(false)
   const [comment, setComment] = useState('')
   const [objectionInputs, setObjectionInputs] = useState<Record<string, string>>({})
   const [result, setResult] = useState('')
   const { data, isLoading, error } = useQuery({ queryKey: ['portal', token], queryFn: () => fetchPortalDelivery(token) })
 
+  const codeMutation = useMutation({ mutationFn: () => requestVerificationCode(token, email) })
+  const verifyMutation = useMutation({
+    mutationFn: () => verifyCustomerEmail(token, email, code),
+    onSuccess: () => setIsVerified(true),
+  })
   const verdictMutation = useMutation({
     mutationFn: (input: { criterionKey: string; verdict: string }) =>
       savePortalVerdict(token, input.criterionKey, { comment: '', email, verdict: input.verdict }),
   })
-
   const decisionMutation = useMutation({
     mutationFn: (value: string) =>
       submitPortalDecision(token, {
@@ -67,16 +74,42 @@ export function AcceptancePortalPage({ token }: { token: string }) {
       </header>
 
       <section className="space-y-4 py-8">
+        <h2 className="text-lg font-medium">验证你的身份</h2>
+        <p className="text-sm text-muted-foreground">
+          为让验收结论可追溯到具体的人，请先验证邮箱。验证通过后才能提交验收结论。
+        </p>
+        {isVerified ? (
+          <div className="flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2.5 text-sm text-success">
+            <CheckCircle2 className="size-4" />
+            邮箱 {email} 已验证，可以提交验收结论。
+          </div>
+        ) : (
+          <VerificationPanel
+            code={code}
+            email={email}
+            isSending={codeMutation.isPending}
+            isVerifying={verifyMutation.isPending}
+            hasError={verifyMutation.isError}
+            onCodeChange={setCode}
+            onEmailChange={setEmail}
+            onRequestCode={() => codeMutation.mutate()}
+            onVerify={() => verifyMutation.mutate()}
+            showCode={codeMutation.isSuccess}
+          />
+        )}
+      </section>
+
+      <section className="space-y-4 border-t py-8">
         <h2 className="text-lg font-medium">验收条件</h2>
-        <p className="text-sm text-muted-foreground">请逐条判断交付内容是否满足下列条件，并填写你的邮箱以便记录验收人。</p>
-        <Input label="你的邮箱" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="client@example.com" />
+        <p className="text-sm text-muted-foreground">请逐条判断交付内容是否满足下列条件，判定结果会记录验收人与时间。</p>
         <ul className="space-y-3">
           {data.manifest.criteria.map((criterion) => (
             <CriterionCard
               criterion={criterion}
+              disabled={!isVerified}
               key={criterion.key}
-              onVerdict={(value) => verdictMutation.mutate({ criterionKey: criterion.key, verdict: value })}
               onObjection={(value) => setObjectionInputs((current) => ({ ...current, [criterion.key]: value }))}
+              onVerdict={(value) => verdictMutation.mutate({ criterionKey: criterion.key, verdict: value })}
               verdict={data.verdicts.find((item) => item.criterionKey === criterion.key)}
             />
           ))}
@@ -87,10 +120,10 @@ export function AcceptancePortalPage({ token }: { token: string }) {
         <h2 className="text-lg font-medium">给出最终结论</h2>
         <Textarea label="总体说明" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="简要说明你的验收意见" />
         <div className="flex flex-col gap-3 sm:flex-row">
-          <Button disabled={!email || decisionMutation.isPending} onClick={() => decisionMutation.mutate('approve')}>
+          <Button disabled={!isVerified || decisionMutation.isPending} onClick={() => decisionMutation.mutate('approve')}>
             确认验收通过
           </Button>
-          <Button disabled={!email || decisionMutation.isPending} variant="outline" onClick={() => decisionMutation.mutate('reject')}>
+          <Button disabled={!isVerified || decisionMutation.isPending} variant="outline" onClick={() => decisionMutation.mutate('reject')}>
             提出异议
           </Button>
         </div>
@@ -125,14 +158,78 @@ export function AcceptancePortalPage({ token }: { token: string }) {
   )
 }
 
+interface VerificationPanelProps {
+  code: string
+  email: string
+  hasError: boolean
+  isSending: boolean
+  isVerifying: boolean
+  onCodeChange: (value: string) => void
+  onEmailChange: (value: string) => void
+  onRequestCode: () => void
+  onVerify: () => void
+  showCode: boolean
+}
+
+/** 邮箱验证面板，先获取验证码再完成验证。 */
+function VerificationPanel({
+  code,
+  email,
+  hasError,
+  isSending,
+  isVerifying,
+  onCodeChange,
+  onEmailChange,
+  onRequestCode,
+  onVerify,
+  showCode,
+}: VerificationPanelProps) {
+  return (
+    <div className="space-y-3 rounded-lg border p-4">
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <Input
+          className="sm:flex-1"
+          label="邮箱"
+          required
+          type="email"
+          value={email}
+          onChange={(e) => onEmailChange(e.target.value)}
+          placeholder="client@example.com"
+        />
+        <Button className="sm:self-end" disabled={!email || isSending} onClick={onRequestCode} variant="outline">
+          {isSending ? '发送中…' : '获取验证码'}
+        </Button>
+      </div>
+      {showCode && (
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Input
+            className="sm:flex-1"
+            label="验证码"
+            required
+            value={code}
+            onChange={(e) => onCodeChange(e.target.value)}
+            placeholder="6 位数字"
+          />
+          <Button className="sm:self-end" disabled={code.length !== 6 || isVerifying} onClick={onVerify}>
+            {isVerifying ? '验证中…' : '完成验证'}
+          </Button>
+        </div>
+      )}
+      {hasError && <p className="text-sm text-danger">验证码无效或已过期，请重新获取。</p>}
+    </div>
+  )
+}
+
 /** 单条验收条件卡片，提供通过、不通过与异议填写。 */
 function CriterionCard({
   criterion,
+  disabled,
   onObjection,
   onVerdict,
   verdict,
 }: {
   criterion: ManifestCriterion
+  disabled: boolean
   onObjection: (value: string) => void
   onVerdict: (value: string) => void
   verdict?: AcceptanceVerdict
@@ -153,14 +250,15 @@ function CriterionCard({
         )}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => onVerdict('pass')} size="sm" variant={verdict?.verdict === 'pass' ? 'default' : 'outline'}>
+        <Button disabled={disabled} onClick={() => onVerdict('pass')} size="sm" variant={verdict?.verdict === 'pass' ? 'default' : 'outline'}>
           符合
         </Button>
-        <Button onClick={() => onVerdict('fail')} size="sm" variant={verdict?.verdict === 'fail' ? 'default' : 'outline'}>
+        <Button disabled={disabled} onClick={() => onVerdict('fail')} size="sm" variant={verdict?.verdict === 'fail' ? 'default' : 'outline'}>
           不符合
         </Button>
       </div>
       <Textarea
+        disabled={disabled}
         label="提出异议（可选）"
         value={objection}
         onChange={(e) => setObjection(e.target.value)}

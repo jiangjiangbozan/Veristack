@@ -22,7 +22,18 @@ const (
 	storageDriverS3      = "s3"
 	storageDriverLocal   = "local"
 	envPrefix            = "VERISTACK"
+	minSecretLength      = 32
+	defaultSMTPPort      = 587
+	defaultSMTPTimeout   = 10 * time.Second
 )
+
+// insecureSecrets 是示例与历史默认值，出现即拒绝启动。
+var insecureSecrets = []string{
+	"change-me-in-production",
+	"changeme",
+	"secret",
+	"veristack",
+}
 
 // AIConfig 描述模型适配器参数，未配置密钥时退化为本地确定性规则。
 type AIConfig struct {
@@ -46,6 +57,7 @@ type SigningConfig struct {
 type Config struct {
 	AI       AIConfig       // 模型适配配置
 	Auth     AuthConfig     // 会话令牌配置
+	SMTP     SMTPConfig     // 邮件发送通道
 	Database DatabaseConfig // 数据库连接配置
 	LogLevel string         // 日志级别
 	Server   ServerConfig   // HTTP 服务配置
@@ -100,6 +112,17 @@ func Load() (*Config, error) {
 			MaxIdleConns: v.GetInt("database.maxidleconns"),
 		},
 		LogLevel: v.GetString("loglevel"),
+		SMTP: SMTPConfig{
+			Enabled:  v.GetBool("smtp.enabled"),
+			From:     v.GetString("smtp.from"),
+			FromName: v.GetString("smtp.fromname"),
+			Host:     v.GetString("smtp.host"),
+			Password: v.GetString("smtp.password"),
+			Port:     v.GetInt("smtp.port"),
+			Timeout:  v.GetDuration("smtp.timeout"),
+			TLS:      v.GetBool("smtp.tls"),
+			Username: v.GetString("smtp.username"),
+		},
 		Server: ServerConfig{
 			Addr:         v.GetString("server.addr"),
 			ReadTimeout:  v.GetDuration("server.readtimeout"),
@@ -125,15 +148,43 @@ func Load() (*Config, error) {
 }
 
 // Validate 校验必填配置，让错误在服务启动阶段以可读信息暴露。
+//
+// 配置采用 Fail Closed 原则：已知默认值、过弱密钥与尚未实现的驱动都必须拒绝启动，
+// 避免服务在「看起来正常」的状态下用错误的安全配置对外提供服务。
 func (c *Config) Validate() error {
 	if c.Auth.Secret == "" {
 		return fmt.Errorf("令牌签名密钥不能为空")
 	}
+	if err := ValidateSecretStrength(c.Auth.Secret); err != nil {
+		return err
+	}
 	if c.Database.DSN == "" {
 		return fmt.Errorf("数据库 DSN 不能为空")
 	}
-	if c.Storage.Driver != storageDriverLocal && c.Storage.Driver != storageDriverS3 {
-		return fmt.Errorf("存储驱动必须为 %s 或 %s，当前为 %q", storageDriverLocal, storageDriverS3, c.Storage.Driver)
+	if c.Storage.Driver != storageDriverLocal {
+		return fmt.Errorf("存储驱动 %q 尚未实现，当前仅支持 %s", c.Storage.Driver, storageDriverLocal)
+	}
+	if c.Storage.LocalRoot == "" {
+	}
+	if err := c.SMTP.Validate(); err != nil {
+		return err
+	}
+	if c.Storage.LocalRoot == "" {
+		return fmt.Errorf("本地存储根目录不能为空")
+	}
+	return nil
+}
+
+// ValidateSecretStrength 校验密钥强度，拒绝已知默认值与过短密钥。
+func ValidateSecretStrength(secret string) error {
+	normalized := strings.ToLower(strings.TrimSpace(secret))
+	for _, weak := range insecureSecrets {
+		if normalized == weak {
+			return fmt.Errorf("令牌签名密钥仍是示例默认值，必须改为随机值")
+		}
+	}
+	if len(secret) < minSecretLength {
+		return fmt.Errorf("令牌签名密钥长度不足 %d 位，当前 %d 位", minSecretLength, len(secret))
 	}
 	return nil
 }
@@ -152,6 +203,8 @@ func newViper() *viper.Viper {
 	v.SetDefault("server.addr", defaultServerAddr)
 	v.SetDefault("server.readtimeout", defaultTimeout)
 	v.SetDefault("server.writetimeout", defaultTimeout)
+	v.SetDefault("smtp.port", defaultSMTPPort)
+	v.SetDefault("smtp.timeout", defaultSMTPTimeout)
 	v.SetDefault("storage.driver", storageDriverLocal)
 	v.SetDefault("storage.localroot", defaultStorageRoot)
 	return v

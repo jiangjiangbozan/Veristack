@@ -2,6 +2,7 @@
 package milestone
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -60,7 +61,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "milestone.create", milestone.ID, nil, milestone)
+	if err := h.recordAudit(r.Context(), r, principal, "milestone.create", milestone.ID, nil, milestone); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, CreateMilestoneResponse{Milestone: views.FromMilestone(milestone)})
 }
 
@@ -136,9 +140,9 @@ func (h *Handler) principal(r *http.Request) (access.Principal, *db.Queries, err
 }
 
 // recordAudit 记录里程碑写操作的审计事件。
-func (h *Handler) recordAudit(r *http.Request, principal access.Principal, action string, milestoneID uuid.UUID, before, after any) {
-	writer := audit.Writer{Queries: db.New(h.Service.Database)}
-	_ = writer.Record(r.Context(), audit.FromRequest(r, principal.ID), action, "milestone", milestoneID, before, after)
+func (h *Handler) recordAudit(ctx context.Context, r *http.Request, principal access.Principal, action string, milestoneID uuid.UUID, before, after any) error {
+	writer := audit.WriterFor(ctx, h.Service.Database)
+	return writer.Record(ctx, audit.FromRequest(r, principal.ID), action, "milestone", milestoneID, before, after)
 }
 
 // remove 软删除里程碑。
@@ -165,7 +169,10 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "milestone.delete", milestoneID, milestone, nil)
+	if err := h.recordAudit(r.Context(), r, principal, "milestone.delete", milestoneID, milestone, nil); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, map[string]bool{"deleted": true})
 }
 
@@ -199,6 +206,9 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, err)
 		return
 	}
-	h.recordAudit(r, principal, "milestone.update", milestoneID, milestone, updated)
+	if err := h.recordAudit(r.Context(), r, principal, "milestone.update", milestoneID, milestone, updated); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, CreateMilestoneResponse{Milestone: views.FromMilestone(updated)})
 }

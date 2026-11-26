@@ -26,26 +26,41 @@ func (q *Queries) CountEvidenceByDelivery(ctx context.Context, deliveryID pgtype
 	return count, err
 }
 
+const countEvidenceByProject = `-- name: CountEvidenceByProject :one
+SELECT count(*) FROM evidence_items
+WHERE project_id = $1 AND deleted_at IS NULL
+`
+
+// 统计项目证据总数。
+func (q *Queries) CountEvidenceByProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countEvidenceByProject, projectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createEvidenceItem = `-- name: CreateEvidenceItem :one
-INSERT INTO evidence_items (project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, note, occurred_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, occurred_at, created_at, deleted_at, note
+INSERT INTO evidence_items (project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, note, occurred_at, source_fingerprint)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::text)
+RETURNING id, project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, occurred_at, created_at, deleted_at, note, source_fingerprint
 `
 
 type CreateEvidenceItemParams struct {
-	ProjectID     uuid.UUID   `json:"project_id"`
-	DeliveryID    pgtype.UUID `json:"delivery_id"`
-	RequirementID pgtype.UUID `json:"requirement_id"`
-	Type          string      `json:"type"`
-	Title         string      `json:"title"`
-	FileKey       pgtype.Text `json:"file_key"`
-	Sha256        pgtype.Text `json:"sha256"`
-	Source        pgtype.Text `json:"source"`
-	Note          pgtype.Text `json:"note"`
-	OccurredAt    time.Time   `json:"occurred_at"`
+	ProjectID         uuid.UUID   `json:"project_id"`
+	DeliveryID        pgtype.UUID `json:"delivery_id"`
+	RequirementID     pgtype.UUID `json:"requirement_id"`
+	Type              string      `json:"type"`
+	Title             string      `json:"title"`
+	FileKey           pgtype.Text `json:"file_key"`
+	Sha256            pgtype.Text `json:"sha256"`
+	Source            pgtype.Text `json:"source"`
+	Note              pgtype.Text `json:"note"`
+	OccurredAt        time.Time   `json:"occurred_at"`
+	SourceFingerprint pgtype.Text `json:"source_fingerprint"`
 }
 
 // 记录一条证据，文件证据保存对象键与内容摘要。
+// 提交指纹用于保证 Webhook 幂等：同一项目内重复指纹会被唯一约束拒绝。
 func (q *Queries) CreateEvidenceItem(ctx context.Context, arg CreateEvidenceItemParams) (EvidenceItem, error) {
 	row := q.db.QueryRow(ctx, createEvidenceItem,
 		arg.ProjectID,
@@ -58,6 +73,7 @@ func (q *Queries) CreateEvidenceItem(ctx context.Context, arg CreateEvidenceItem
 		arg.Source,
 		arg.Note,
 		arg.OccurredAt,
+		arg.SourceFingerprint,
 	)
 	var i EvidenceItem
 	err := row.Scan(
@@ -74,12 +90,46 @@ func (q *Queries) CreateEvidenceItem(ctx context.Context, arg CreateEvidenceItem
 		&i.CreatedAt,
 		&i.DeletedAt,
 		&i.Note,
+		&i.SourceFingerprint,
+	)
+	return i, err
+}
+
+const getEvidenceByFingerprint = `-- name: GetEvidenceByFingerprint :one
+SELECT id, project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, occurred_at, created_at, deleted_at, note, source_fingerprint FROM evidence_items
+WHERE project_id = $1 AND source_fingerprint = $2 AND deleted_at IS NULL
+`
+
+type GetEvidenceByFingerprintParams struct {
+	ProjectID         uuid.UUID   `json:"project_id"`
+	SourceFingerprint pgtype.Text `json:"source_fingerprint"`
+}
+
+// 按提交指纹读取证据，用于判断 Webhook 是否重复投递。
+func (q *Queries) GetEvidenceByFingerprint(ctx context.Context, arg GetEvidenceByFingerprintParams) (EvidenceItem, error) {
+	row := q.db.QueryRow(ctx, getEvidenceByFingerprint, arg.ProjectID, arg.SourceFingerprint)
+	var i EvidenceItem
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.DeliveryID,
+		&i.RequirementID,
+		&i.Type,
+		&i.Title,
+		&i.FileKey,
+		&i.Sha256,
+		&i.Source,
+		&i.OccurredAt,
+		&i.CreatedAt,
+		&i.DeletedAt,
+		&i.Note,
+		&i.SourceFingerprint,
 	)
 	return i, err
 }
 
 const getEvidenceItem = `-- name: GetEvidenceItem :one
-SELECT id, project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, occurred_at, created_at, deleted_at, note FROM evidence_items
+SELECT id, project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, occurred_at, created_at, deleted_at, note, source_fingerprint FROM evidence_items
 WHERE id = $1 AND deleted_at IS NULL
 `
 
@@ -101,12 +151,13 @@ func (q *Queries) GetEvidenceItem(ctx context.Context, id uuid.UUID) (EvidenceIt
 		&i.CreatedAt,
 		&i.DeletedAt,
 		&i.Note,
+		&i.SourceFingerprint,
 	)
 	return i, err
 }
 
 const listEvidenceByDelivery = `-- name: ListEvidenceByDelivery :many
-SELECT id, project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, occurred_at, created_at, deleted_at, note FROM evidence_items
+SELECT id, project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, occurred_at, created_at, deleted_at, note, source_fingerprint FROM evidence_items
 WHERE delivery_id = $1 AND deleted_at IS NULL
 ORDER BY occurred_at DESC, created_at DESC
 `
@@ -135,6 +186,7 @@ func (q *Queries) ListEvidenceByDelivery(ctx context.Context, deliveryID pgtype.
 			&i.CreatedAt,
 			&i.DeletedAt,
 			&i.Note,
+			&i.SourceFingerprint,
 		); err != nil {
 			return nil, err
 		}
@@ -147,7 +199,7 @@ func (q *Queries) ListEvidenceByDelivery(ctx context.Context, deliveryID pgtype.
 }
 
 const listEvidenceByProject = `-- name: ListEvidenceByProject :many
-SELECT id, project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, occurred_at, created_at, deleted_at, note FROM evidence_items
+SELECT id, project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, occurred_at, created_at, deleted_at, note, source_fingerprint FROM evidence_items
 WHERE project_id = $1 AND deleted_at IS NULL
 ORDER BY occurred_at DESC, created_at DESC
 `
@@ -176,6 +228,7 @@ func (q *Queries) ListEvidenceByProject(ctx context.Context, projectID uuid.UUID
 			&i.CreatedAt,
 			&i.DeletedAt,
 			&i.Note,
+			&i.SourceFingerprint,
 		); err != nil {
 			return nil, err
 		}
@@ -191,7 +244,7 @@ const softDeleteEvidenceItem = `-- name: SoftDeleteEvidenceItem :one
 UPDATE evidence_items
 SET deleted_at = now()
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, occurred_at, created_at, deleted_at, note
+RETURNING id, project_id, delivery_id, requirement_id, type, title, file_key, sha256, source, occurred_at, created_at, deleted_at, note, source_fingerprint
 `
 
 // 软删除证据记录。
@@ -212,6 +265,7 @@ func (q *Queries) SoftDeleteEvidenceItem(ctx context.Context, id uuid.UUID) (Evi
 		&i.CreatedAt,
 		&i.DeletedAt,
 		&i.Note,
+		&i.SourceFingerprint,
 	)
 	return i, err
 }

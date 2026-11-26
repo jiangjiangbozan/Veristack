@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"api/internal/platform/database"
 	"api/internal/platform/db"
 	"api/internal/platform/dbutil"
 	"api/internal/platform/errs"
@@ -22,12 +23,7 @@ type Service struct {
 
 // Create 在事务内创建下一版本基线并写入需求，创建后立即冻结为正式版本。
 func (s *Service) Create(ctx context.Context, projectID uuid.UUID, req CreateBaselineRequest) (db.ScopeBaseline, error) {
-	tx, err := s.Database.Begin(ctx)
-	if err != nil {
-		return db.ScopeBaseline{}, fmt.Errorf("开启创建基线事务失败: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	queries := db.New(tx)
+	queries := database.Queries(ctx, s.Database)
 	nextVersion, err := s.nextVersion(ctx, queries, projectID)
 	if err != nil {
 		return db.ScopeBaseline{}, err
@@ -67,20 +63,12 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, req CreateBas
 	if err != nil {
 		return db.ScopeBaseline{}, fmt.Errorf("冻结基线失败: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return db.ScopeBaseline{}, fmt.Errorf("提交基线事务失败: %w", err)
-	}
 	return frozen, nil
 }
 
 // CreateFromSnapshot 依据变更申请的需求快照创建新基线，供客户确认变更时调用。
 func (s *Service) CreateFromSnapshot(ctx context.Context, projectID, changeRequestID uuid.UUID, requirements []views.RequirementView) (db.ScopeBaseline, error) {
-	tx, err := s.Database.Begin(ctx)
-	if err != nil {
-		return db.ScopeBaseline{}, fmt.Errorf("开启变更基线事务失败: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	queries := db.New(tx)
+	queries := database.Queries(ctx, s.Database)
 	nextVersion, err := s.nextVersion(ctx, queries, projectID)
 	if err != nil {
 		return db.ScopeBaseline{}, err
@@ -104,19 +92,16 @@ func (s *Service) CreateFromSnapshot(ctx context.Context, projectID, changeReque
 	if err != nil {
 		return db.ScopeBaseline{}, fmt.Errorf("冻结变更基线失败: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return db.ScopeBaseline{}, fmt.Errorf("提交变更基线事务失败: %w", err)
-	}
 	return frozen, nil
 }
 
 // Diff 对比两个基线的需求差异，以基准基线为参照。
 func (s *Service) Diff(ctx context.Context, baseID, targetID uuid.UUID) (DiffBaselineResponse, error) {
-	base, err := db.New(s.Database).GetScopeBaseline(ctx, baseID)
+	base, err := database.Queries(ctx, s.Database).GetScopeBaseline(ctx, baseID)
 	if err != nil {
 		return DiffBaselineResponse{}, errs.NotFound("基准基线不存在", err)
 	}
-	target, err := db.New(s.Database).GetScopeBaseline(ctx, targetID)
+	target, err := database.Queries(ctx, s.Database).GetScopeBaseline(ctx, targetID)
 	if err != nil {
 		return DiffBaselineResponse{}, errs.NotFound("对比基线不存在", err)
 	}
@@ -127,7 +112,7 @@ func (s *Service) Diff(ctx context.Context, baseID, targetID uuid.UUID) (DiffBas
 
 // Get 按 ID 读取基线。
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (db.ScopeBaseline, error) {
-	baseline, err := db.New(s.Database).GetScopeBaseline(ctx, id)
+	baseline, err := database.Queries(ctx, s.Database).GetScopeBaseline(ctx, id)
 	if err != nil {
 		return db.ScopeBaseline{}, errs.NotFound("基线不存在", err)
 	}
@@ -136,7 +121,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (db.ScopeBaseline, erro
 
 // List 列出项目的全部基线版本。
 func (s *Service) List(ctx context.Context, projectID uuid.UUID) ([]db.ScopeBaseline, error) {
-	return db.New(s.Database).ListScopeBaselines(ctx, projectID)
+	return database.Queries(ctx, s.Database).ListScopeBaselines(ctx, projectID)
 }
 
 // nextVersion 计算下一版本号，项目尚无基线时从 1 开始。

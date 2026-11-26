@@ -16,6 +16,8 @@ type Querier interface {
 	ClaimPendingOutboxTasks(ctx context.Context, limit int32) ([]OutboxTask, error)
 	// 标记任务处理成功。
 	CompleteOutboxTask(ctx context.Context, id uuid.UUID) (OutboxTask, error)
+	// 标记验证码已被使用，避免同一验证码重复核验。
+	ConsumeEmailVerificationCode(ctx context.Context, id uuid.UUID) (EmailVerificationCode, error)
 	// 统计项目的 CI 报告总数。
 	CountCIReportsByProject(ctx context.Context, projectID uuid.UUID) (int64, error)
 	// 统计项目变更申请总数，供分页元信息使用。
@@ -24,6 +26,8 @@ type Querier interface {
 	CountDeliveriesByProject(ctx context.Context, projectID uuid.UUID) (int64, error)
 	// 统计交付版本的证据数量。
 	CountEvidenceByDelivery(ctx context.Context, deliveryID pgtype.UUID) (int64, error)
+	// 统计项目证据总数。
+	CountEvidenceByProject(ctx context.Context, projectID uuid.UUID) (int64, error)
 	// 统计交付版本中未通过的验收条件数量。
 	CountFailingVerdicts(ctx context.Context, deliveryID uuid.UUID) (int64, error)
 	// 统计项目里程碑总数，供项目概览使用。
@@ -56,7 +60,10 @@ type Querier interface {
 	CreateChangeRequest(ctx context.Context, arg CreateChangeRequestParams) (ChangeRequest, error)
 	// 创建交付版本，交付清单快照随版本一同冻结。
 	CreateDelivery(ctx context.Context, arg CreateDeliveryParams) (Delivery, error)
+	// 保存一次性邮箱验证码，只保存验证码摘要，不保存明文。
+	CreateEmailVerificationCode(ctx context.Context, arg CreateEmailVerificationCodeParams) (EmailVerificationCode, error)
 	// 记录一条证据，文件证据保存对象键与内容摘要。
+	// 提交指纹用于保证 Webhook 幂等：同一项目内重复指纹会被唯一约束拒绝。
 	CreateEvidenceItem(ctx context.Context, arg CreateEvidenceItemParams) (EvidenceItem, error)
 	// 创建里程碑，关联需求以 JSONB 数组保存。
 	CreateMilestone(ctx context.Context, arg CreateMilestoneParams) (Milestone, error)
@@ -92,12 +99,18 @@ type Querier interface {
 	FreezeScopeBaseline(ctx context.Context, arg FreezeScopeBaselineParams) (ScopeBaseline, error)
 	// 读取单条 AI 建议。
 	GetAISuggestion(ctx context.Context, id uuid.UUID) (AiSuggestion, error)
+	// 读取客户在某个交付上的验收身份。
+	GetAcceptanceIdentity(ctx context.Context, arg GetAcceptanceIdentityParams) (AcceptanceIdentity, error)
 	// 读取客户对交付的确认记录。
 	GetApproval(ctx context.Context, arg GetApprovalParams) (Approval, error)
 	// 按 ID 读取变更申请，供确认流程与归属校验。
 	GetChangeRequest(ctx context.Context, id uuid.UUID) (ChangeRequest, error)
 	// 读取单个交付版本。
 	GetDelivery(ctx context.Context, id uuid.UUID) (Delivery, error)
+	// 按验证码摘要读取待验证的验证码记录。
+	GetEmailVerificationCode(ctx context.Context, codeHash string) (EmailVerificationCode, error)
+	// 按提交指纹读取证据，用于判断 Webhook 是否重复投递。
+	GetEvidenceByFingerprint(ctx context.Context, arg GetEvidenceByFingerprintParams) (EvidenceItem, error)
 	// 读取单条证据。
 	GetEvidenceItem(ctx context.Context, id uuid.UUID) (EvidenceItem, error)
 	// 读取项目最新版本基线，作为变更与交付的默认来源。
@@ -170,6 +183,8 @@ type Querier interface {
 	MarkAISuggestionApplied(ctx context.Context, id uuid.UUID) (AiSuggestion, error)
 	// 标记 AI 建议已被忽略。
 	MarkAISuggestionDismissed(ctx context.Context, id uuid.UUID) (AiSuggestion, error)
+	// 标记用户邮箱已通过验证。
+	MarkUserEmailVerified(ctx context.Context, id uuid.UUID) (User, error)
 	// 标记 Webhook 事件已处理完成。
 	MarkWebhookProcessed(ctx context.Context, arg MarkWebhookProcessedParams) (Webhook, error)
 	// 关闭异议并记录关闭时间。
@@ -200,6 +215,8 @@ type Querier interface {
 	UpdateMilestone(ctx context.Context, arg UpdateMilestoneParams) (Milestone, error)
 	// 更新项目可编辑字段，冻结字段不在此列。
 	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
+	// 记录客户在某个交付上的验收身份，区分已验证与未验证。
+	UpsertAcceptanceIdentity(ctx context.Context, arg UpsertAcceptanceIdentityParams) (AcceptanceIdentity, error)
 	// 保存客户对单条验收条件的裁定结论，同一条件重复提交时覆盖结论。
 	UpsertAcceptanceVerdict(ctx context.Context, arg UpsertAcceptanceVerdictParams) (AcceptanceVerdict, error)
 }

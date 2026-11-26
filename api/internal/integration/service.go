@@ -15,6 +15,7 @@ import (
 
 	"api/internal/platform/ai"
 	"api/internal/platform/config"
+	"api/internal/platform/database"
 	"api/internal/platform/db"
 	"api/internal/platform/dbutil"
 	"api/internal/platform/errs"
@@ -36,7 +37,7 @@ type Service struct {
 
 // ApplySuggestion 采纳一条 AI 建议，仅改变建议状态，不直接改写正式基线。
 func (s *Service) ApplySuggestion(ctx context.Context, id uuid.UUID) (db.AiSuggestion, error) {
-	suggestion, err := db.New(s.Database).MarkAISuggestionApplied(ctx, id)
+	suggestion, err := database.Queries(ctx, s.Database).MarkAISuggestionApplied(ctx, id)
 	if err != nil {
 		return db.AiSuggestion{}, errs.NotFound("AI 建议不存在", err)
 	}
@@ -45,7 +46,7 @@ func (s *Service) ApplySuggestion(ctx context.Context, id uuid.UUID) (db.AiSugge
 
 // DismissSuggestion 忽略一条 AI 建议，保留记录以便追溯。
 func (s *Service) DismissSuggestion(ctx context.Context, id uuid.UUID) (db.AiSuggestion, error) {
-	suggestion, err := db.New(s.Database).MarkAISuggestionDismissed(ctx, id)
+	suggestion, err := database.Queries(ctx, s.Database).MarkAISuggestionDismissed(ctx, id)
 	if err != nil {
 		return db.AiSuggestion{}, errs.NotFound("AI 建议不存在", err)
 	}
@@ -93,7 +94,7 @@ func (s *Service) ImportCIReport(ctx context.Context, projectID uuid.UUID, req I
 	if err != nil {
 		return db.CiReport{}, testreport.Summary{}, errs.BadRequest("交付版本 ID 无效", err)
 	}
-	report, err := db.New(s.Database).CreateCIReport(ctx, db.CreateCIReportParams{
+	report, err := database.Queries(ctx, s.Database).CreateCIReport(ctx, db.CreateCIReportParams{
 		BuildNo:      dbutil.TextFromString(req.BuildNo),
 		DeliveryID:   dbutil.NullableUUID(deliveryID),
 		DurationMs:   dbutil.NullableInt64(summary.TotalDuration().Milliseconds()),
@@ -114,7 +115,7 @@ func (s *Service) ImportCIReport(ctx context.Context, projectID uuid.UUID, req I
 
 // ListSuggestions 列出项目的 AI 建议草稿。
 func (s *Service) ListSuggestions(ctx context.Context, projectID uuid.UUID, kind string, limit, offset int32) ([]db.AiSuggestion, error) {
-	return db.New(s.Database).ListAISuggestionsByProject(ctx, db.ListAISuggestionsByProjectParams{
+	return database.Queries(ctx, s.Database).ListAISuggestionsByProject(ctx, db.ListAISuggestionsByProjectParams{
 		Kind:      kind,
 		Limit:     limit,
 		Offset:    offset,
@@ -124,7 +125,7 @@ func (s *Service) ListSuggestions(ctx context.Context, projectID uuid.UUID, kind
 
 // ListWebhooks 列出项目收到的 Webhook 事件。
 func (s *Service) ListWebhooks(ctx context.Context, projectID uuid.UUID, limit, offset int32) ([]db.Webhook, error) {
-	return db.New(s.Database).ListWebhooksByProject(ctx, db.ListWebhooksByProjectParams{
+	return database.Queries(ctx, s.Database).ListWebhooksByProject(ctx, db.ListWebhooksByProjectParams{
 		Limit:     limit,
 		Offset:    offset,
 		ProjectID: dbutil.NullableUUID(projectID),
@@ -136,7 +137,7 @@ func (s *Service) ReceiveWebhook(ctx context.Context, provider, eventType, signa
 	if err := s.VerifySignature(provider, signature, payload); err != nil {
 		return db.Webhook{}, err
 	}
-	queries := db.New(s.Database)
+	queries := database.Queries(ctx, s.Database)
 	event := db.CreateWebhookParams{
 		EventType: eventType,
 		Payload:   payload,
@@ -227,7 +228,7 @@ func (s *Service) saveSuggestion(ctx context.Context, projectID uuid.UUID, kind 
 	if err != nil {
 		return db.AiSuggestion{}, fmt.Errorf("序列化模型建议失败: %w", err)
 	}
-	suggestion, err := db.New(s.Database).CreateAISuggestion(ctx, db.CreateAISuggestionParams{
+	suggestion, err := database.Queries(ctx, s.Database).CreateAISuggestion(ctx, db.CreateAISuggestionParams{
 		Content:   payload,
 		Kind:      kind,
 		Model:     dbutil.TextFromString(s.AI.Name()),

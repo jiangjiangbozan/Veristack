@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"api/internal/platform/database"
 	"api/internal/platform/datetime"
 	"api/internal/platform/db"
 	"api/internal/platform/dbutil"
@@ -41,7 +42,7 @@ func (s *Service) CreateManual(ctx context.Context, projectID, deliveryID uuid.U
 	if err != nil {
 		return db.EvidenceItem{}, errs.BadRequest("关联需求 ID 无效", err)
 	}
-	return db.New(s.Database).CreateEvidenceItem(ctx, db.CreateEvidenceItemParams{
+	return database.Queries(ctx, s.Database).CreateEvidenceItem(ctx, db.CreateEvidenceItemParams{
 		DeliveryID:    pgtype.UUID{Bytes: deliveryID, Valid: true},
 		Note:          dbutil.TextFromString(req.Note),
 		OccurredAt:    datetime.Now(),
@@ -68,7 +69,7 @@ func (s *Service) CreateUpload(ctx context.Context, projectID, deliveryID uuid.U
 	if err != nil {
 		return db.EvidenceItem{}, errs.BadRequest("关联需求 ID 无效", err)
 	}
-	return db.New(s.Database).CreateEvidenceItem(ctx, db.CreateEvidenceItemParams{
+	return database.Queries(ctx, s.Database).CreateEvidenceItem(ctx, db.CreateEvidenceItemParams{
 		DeliveryID:    pgtype.UUID{Bytes: deliveryID, Valid: true},
 		FileKey:       dbutil.TextFromString(storedKey),
 		Note:          dbutil.TextFromString(req.Note),
@@ -84,7 +85,7 @@ func (s *Service) CreateUpload(ctx context.Context, projectID, deliveryID uuid.U
 
 // Get 按 ID 读取证据。
 func (s *Service) Get(ctx context.Context, id uuid.UUID) (db.EvidenceItem, error) {
-	item, err := db.New(s.Database).GetEvidenceItem(ctx, id)
+	item, err := database.Queries(ctx, s.Database).GetEvidenceItem(ctx, id)
 	if err != nil {
 		return db.EvidenceItem{}, errs.NotFound("证据不存在", err)
 	}
@@ -93,7 +94,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (db.EvidenceItem, error
 
 // ListByDelivery 列出交付版本的证据时间线。
 func (s *Service) ListByDelivery(ctx context.Context, deliveryID uuid.UUID) ([]db.EvidenceItem, error) {
-	return db.New(s.Database).ListEvidenceByDelivery(ctx, pgtype.UUID{Bytes: deliveryID, Valid: true})
+	return database.Queries(ctx, s.Database).ListEvidenceByDelivery(ctx, pgtype.UUID{Bytes: deliveryID, Valid: true})
 }
 
 // Open 打开证据附件内容供下载。
@@ -153,5 +154,5 @@ func (h *hashWriter) digest() string {
 
 // ListByProject 列出项目下全部证据，便于从项目视角查看自动化采集结果。
 func (s *Service) ListByProject(ctx context.Context, projectID uuid.UUID) ([]db.EvidenceItem, error) {
-	return db.New(s.Database).ListEvidenceByProject(ctx, projectID)
+	return database.Queries(ctx, s.Database).ListEvidenceByProject(ctx, projectID)
 }
