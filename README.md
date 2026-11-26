@@ -261,7 +261,9 @@ make compose-up    # 启动完整容器环境
 
 | 文档 | 内容 |
 | --- | --- |
+| [`docs/next-steps.md`](docs/next-steps.md) | **待办清单**：从 Alpha 到商业版的分级任务、验收标准与分工 |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | 产品定位、需求清单、数据模型、API 设计与实现路线 |
+| [`docs/todo.md`](docs/todo.md) | 商业化审查报告（外部评审视角） |
 | [`docs/chatGPT-chat-history.md`](docs/chatGPT-chat-history.md) | 产品定位的推演过程与技术选型依据 |
 | [`deploy/docs/deployment.md`](deploy/docs/deployment.md) | 私有化部署、环境变量、备份恢复与常见问题 |
 | [`api/contracts/openapi/openapi.yaml`](api/contracts/openapi/openapi.yaml) | OpenAPI 3.1 接口契约 |

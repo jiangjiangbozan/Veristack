@@ -17,17 +17,19 @@ Veristack 是一个**独立于 Git、CI、测试框架和 Agent 平台的软件�
 
 ## 2. 当前框架现状盘点
 
+> 本节于 Alpha 收尾时更新，与仓库实际代码一致。历史阶段划分见第 9 节。
+
 | 目录 | 现状 | 缺口 |
 | --- | --- | --- |
-| `web/` | React 19.3 + TypeScript 6 + Vite 8 默认模板，仅 `App.tsx`、`main.tsx` 及模板样式 | 无路由、无数据请求层、无 UI 组件库、无状态管理、无业务页面 |
-| `api/` | Go 1.27.2，已引入 Chi v5.5.0，无任何源码 | 无程序入口、无配置、无分层代码、无迁移、无 API 契约；待引入 pgx、sqlc、Goose、validator |
+| `web/` | React 19.3 + TypeScript 6 + Vite 8 + Tailwind 4，TanStack Query/Router/Table，9 个业务功能模块，明暗双主题 | 缺 7 个功能入口：项目编辑、成员管理、AI 交付摘要、AI 变更影响、基线对比、CI 报告列表、证据附件下载 |
+| `api/` | Go 1.27.2 + Chi，10 个业务模块，约 60 个接口，19 张表，96 条 sqlc 查询，Goose 迁移 | 缺审计查询接口、Pack 下载接口、通知模块；0 个测试文件；无 CI 工作流 |
 | `openspec/` | 已初始化 `config.yaml`，`changes/` 与 `specs/` 为空 | 尚未沉淀任何规格 |
-| `docs/` | 原有 `chatGPT-chat-history.md`，已新增 `implementation-plan.md` | 后续按需补充架构与接口文档 |
+| `docs/` | `chatGPT-chat-history.md`、`implementation-plan.md`、`todo.md`（商业化审查）、`next-steps.md`（可执行待办） | 后续按需补充架构与接口文档 |
 | `web/agents.md` | 已按 React + TypeScript + Vite 重写，并补充 UI/UX 视觉约定 | 无 |
 | `api/agents.md` | 已按 Go + Chi + PostgreSQL 重写 | 无 |
-| 根目录 `agents.md` | 混淆了 Java/Spring 约定（`@PreAuthorize`、`stream().filter()`）与通用原则 | 后续应收敛为语言无关原则，本文不改动 |
+| 根目录 `agents.md` | 已改为语言无关的通用原则 + 产品领域约定（34 条） | 无 |
 
-结论：当前处于「空壳」状态，可以先按目标架构一次性把基础层建好，无需背负历史技术债。
+当前成熟度为 **Alpha**：核心业务链路已跑通，但存在 7 项 P0 级可信性缺陷与 0 个自动化测试，尚不能正式商用。完整待办与执行顺序见 [`next-steps.md`](next-steps.md)。
 
 ## 3. 关键决策
 
