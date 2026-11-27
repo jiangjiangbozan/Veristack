@@ -158,6 +158,20 @@ type Milestone struct {
 	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type Notification struct {
+	ID             uuid.UUID          `json:"id"`
+	OrganizationID uuid.UUID          `json:"organization_id"`
+	RecipientID    uuid.UUID          `json:"recipient_id"`
+	Type           string             `json:"type"`
+	Title          string             `json:"title"`
+	Body           string             `json:"body"`
+	Link           string             `json:"link"`
+	DedupeKey      string             `json:"dedupe_key"`
+	ReadAt         pgtype.Timestamptz `json:"read_at"`
+	EmailedAt      pgtype.Timestamptz `json:"emailed_at"`
+	CreatedAt      time.Time          `json:"created_at"`
+}
+
 type Objection struct {
 	ID          uuid.UUID          `json:"id"`
 	DeliveryID  uuid.UUID          `json:"delivery_id"`
@@ -195,6 +209,17 @@ type OutboxTask struct {
 	CreatedAt  time.Time   `json:"created_at"`
 	ProjectID  pgtype.UUID `json:"project_id"`
 	DeliveryID pgtype.UUID `json:"delivery_id"`
+	DedupeKey  string      `json:"dedupe_key"`
+	LastError  pgtype.Text `json:"last_error"`
+}
+
+type PasswordResetToken struct {
+	ID         uuid.UUID          `json:"id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	TokenHash  string             `json:"token_hash"`
+	ExpiresAt  time.Time          `json:"expires_at"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt  time.Time          `json:"created_at"`
 }
 
 type Project struct {

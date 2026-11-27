@@ -38,10 +38,17 @@ func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(ctx context.Context
 // 上下文中有事务时使用事务，否则回退到连接池，
 // 使只读查询无需显式开启事务也能正常工作。
 func Queries(ctx context.Context, pool *pgxpool.Pool) *db.Queries {
+	return db.New(Executor(ctx, pool))
+}
+
+// Executor 返回与当前上下文事务绑定的执行器。
+//
+// 需要执行手写 SQL 时使用它，才能和请求级事务保持同一原子边界。
+func Executor(ctx context.Context, pool *pgxpool.Pool) db.DBTX {
 	if tx, ok := ctx.Value(transactionKey{}).(pgx.Tx); ok {
-		return db.New(tx)
+		return tx
 	}
-	return db.New(pool)
+	return pool
 }
 
 // Middleware 为写请求开启请求级事务。

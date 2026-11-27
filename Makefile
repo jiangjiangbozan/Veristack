@@ -1,11 +1,14 @@
-.PHONY: help api-build api-run api-vet api-test cli-build web-install web-build web-lint web-dev sqlc-gen compose-up compose-down
+.PHONY: help api-build api-run api-vet api-test cli-build migrate-up seed-demo web-install web-build web-lint web-dev sqlc-gen compose-up compose-down
 
 help:
 	@echo "可用命令:"
 	@echo "  api-build    编译 API 服务"
 	@echo "  api-run      本地运行 API 服务"
 	@echo "  api-vet      运行 go vet 静态检查"
+	@echo "  api-test     运行后端测试"
 	@echo "  cli-build    编译 Evidence Pack 核验 CLI"
+	@echo "  migrate-up   对本地数据库执行迁移"
+	@echo "  seed-demo    写入约 1000 条/表的本地演示数据"
 	@echo "  web-install  安装前端依赖"
 	@echo "  web-build    构建前端产物"
 	@echo "  web-lint     运行前端 ESLint"
@@ -28,6 +31,12 @@ api-test:
 
 cli-build:
 	cd api && go build -o veristack ./cmd/veristack
+
+migrate-up:
+	cd api && go run ./cmd/migrate
+
+seed-demo:
+	cd api && go run ./cmd/seed -count 1000
 
 web-install:
 	cd web && npm install

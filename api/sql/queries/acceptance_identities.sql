@@ -9,6 +9,19 @@ RETURNING *;
 SELECT * FROM email_verification_codes
 WHERE code_hash = $1 AND consumed_at IS NULL AND expires_at > now();
 
+-- name: GetLatestEmailVerificationCodeByEmail :one
+-- 按邮箱读取最近一条待验证的验证码，用于累计错误尝试次数。
+SELECT * FROM email_verification_codes
+WHERE lower(email) = lower($1) AND consumed_at IS NULL AND expires_at > now()
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: IncrementEmailVerificationAttempts :exec
+-- 记录一次错误的验证码尝试，达到上限后该验证码失效。
+UPDATE email_verification_codes
+SET attempts = attempts + 1
+WHERE id = $1;
+
 -- name: ConsumeEmailVerificationCode :one
 -- 标记验证码已被使用，避免同一验证码重复核验。
 UPDATE email_verification_codes

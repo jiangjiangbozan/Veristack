@@ -12,20 +12,67 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const claimPendingOutboxTasks = `-- name: ClaimPendingOutboxTasks :many
+const claimPendingEmailOutboxTasks = `-- name: ClaimPendingEmailOutboxTasks :many
 WITH claimed AS (
     SELECT id FROM outbox_tasks
-    WHERE status = 'pending' AND next_run_at <= now()
+    WHERE status = 'pending' AND next_run_at <= now() AND event_type = 'email.send'
     ORDER BY next_run_at ASC
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
 UPDATE outbox_tasks SET status = 'processing', attempts = attempts + 1
 WHERE id IN (SELECT id FROM claimed)
-RETURNING id, event_type, payload, status, attempts, next_run_at, created_at, project_id, delivery_id
+RETURNING id, event_type, payload, status, attempts, next_run_at, created_at, project_id, delivery_id, dedupe_key, last_error
+`
+
+// 邮件专用领取，只处理 email.send，和 Webhook 任务分开扫描。
+func (q *Queries) ClaimPendingEmailOutboxTasks(ctx context.Context, limit int32) ([]OutboxTask, error) {
+	rows, err := q.db.Query(ctx, claimPendingEmailOutboxTasks, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []OutboxTask{}
+	for rows.Next() {
+		var i OutboxTask
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.Payload,
+			&i.Status,
+			&i.Attempts,
+			&i.NextRunAt,
+			&i.CreatedAt,
+			&i.ProjectID,
+			&i.DeliveryID,
+			&i.DedupeKey,
+			&i.LastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const claimPendingOutboxTasks = `-- name: ClaimPendingOutboxTasks :many
+WITH claimed AS (
+    SELECT id FROM outbox_tasks
+    WHERE status = 'pending' AND next_run_at <= now() AND event_type <> 'email.send'
+    ORDER BY next_run_at ASC
+    LIMIT $1
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE outbox_tasks SET status = 'processing', attempts = attempts + 1
+WHERE id IN (SELECT id FROM claimed)
+RETURNING id, event_type, payload, status, attempts, next_run_at, created_at, project_id, delivery_id, dedupe_key, last_error
 `
 
 // 领取到期的待处理任务并标记为处理中，避免多实例重复消费。
+// 邮件任务由独立 Worker 领取，这里排除 email.send，防止两边互相抢走任务。
 func (q *Queries) ClaimPendingOutboxTasks(ctx context.Context, limit int32) ([]OutboxTask, error) {
 	rows, err := q.db.Query(ctx, claimPendingOutboxTasks, limit)
 	if err != nil {
@@ -45,6 +92,8 @@ func (q *Queries) ClaimPendingOutboxTasks(ctx context.Context, limit int32) ([]O
 			&i.CreatedAt,
 			&i.ProjectID,
 			&i.DeliveryID,
+			&i.DedupeKey,
+			&i.LastError,
 		); err != nil {
 			return nil, err
 		}
@@ -58,12 +107,12 @@ func (q *Queries) ClaimPendingOutboxTasks(ctx context.Context, limit int32) ([]O
 
 const completeOutboxTask = `-- name: CompleteOutboxTask :one
 UPDATE outbox_tasks
-SET status = 'done', next_run_at = now()
+SET status = 'done', next_run_at = now(), last_error = NULL
 WHERE id = $1
-RETURNING id, event_type, payload, status, attempts, next_run_at, created_at, project_id, delivery_id
+RETURNING id, event_type, payload, status, attempts, next_run_at, created_at, project_id, delivery_id, dedupe_key, last_error
 `
 
-// 标记任务处理成功。
+// 标记任务处理成功并清空错误信息。
 func (q *Queries) CompleteOutboxTask(ctx context.Context, id uuid.UUID) (OutboxTask, error) {
 	row := q.db.QueryRow(ctx, completeOutboxTask, id)
 	var i OutboxTask
@@ -77,6 +126,8 @@ func (q *Queries) CompleteOutboxTask(ctx context.Context, id uuid.UUID) (OutboxT
 		&i.CreatedAt,
 		&i.ProjectID,
 		&i.DeliveryID,
+		&i.DedupeKey,
+		&i.LastError,
 	)
 	return i, err
 }
@@ -94,9 +145,10 @@ func (q *Queries) CountPendingOutboxTasks(ctx context.Context) (int64, error) {
 }
 
 const createOutboxTask = `-- name: CreateOutboxTask :one
-INSERT INTO outbox_tasks (event_type, payload, project_id, delivery_id)
-VALUES ($1, $2, $3, $4)
-RETURNING id, event_type, payload, status, attempts, next_run_at, created_at, project_id, delivery_id
+INSERT INTO outbox_tasks (event_type, payload, project_id, delivery_id, dedupe_key)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (event_type, dedupe_key) WHERE dedupe_key <> '' DO NOTHING
+RETURNING id, event_type, payload, status, attempts, next_run_at, created_at, project_id, delivery_id, dedupe_key, last_error
 `
 
 type CreateOutboxTaskParams struct {
@@ -104,15 +156,18 @@ type CreateOutboxTaskParams struct {
 	Payload    []byte      `json:"payload"`
 	ProjectID  pgtype.UUID `json:"project_id"`
 	DeliveryID pgtype.UUID `json:"delivery_id"`
+	DedupeKey  string      `json:"dedupe_key"`
 }
 
 // 创建异步任务，先落库再由 Worker 消费，避免消息丢失。
+// dedupe_key 非空时按事件类型幂等，重复入队不会产生第二条任务。
 func (q *Queries) CreateOutboxTask(ctx context.Context, arg CreateOutboxTaskParams) (OutboxTask, error) {
 	row := q.db.QueryRow(ctx, createOutboxTask,
 		arg.EventType,
 		arg.Payload,
 		arg.ProjectID,
 		arg.DeliveryID,
+		arg.DedupeKey,
 	)
 	var i OutboxTask
 	err := row.Scan(
@@ -125,26 +180,34 @@ func (q *Queries) CreateOutboxTask(ctx context.Context, arg CreateOutboxTaskPara
 		&i.CreatedAt,
 		&i.ProjectID,
 		&i.DeliveryID,
+		&i.DedupeKey,
+		&i.LastError,
 	)
 	return i, err
 }
 
 const failOutboxTask = `-- name: FailOutboxTask :one
 UPDATE outbox_tasks
-SET status = $2, next_run_at = now() + make_interval(secs => $3)
+SET status = $2, next_run_at = now() + make_interval(secs => $3), last_error = $4
 WHERE id = $1
-RETURNING id, event_type, payload, status, attempts, next_run_at, created_at, project_id, delivery_id
+RETURNING id, event_type, payload, status, attempts, next_run_at, created_at, project_id, delivery_id, dedupe_key, last_error
 `
 
 type FailOutboxTaskParams struct {
-	ID     uuid.UUID `json:"id"`
-	Status string    `json:"status"`
-	Secs   float64   `json:"secs"`
+	ID        uuid.UUID   `json:"id"`
+	Status    string      `json:"status"`
+	Secs      float64     `json:"secs"`
+	LastError pgtype.Text `json:"last_error"`
 }
 
 // 标记任务处理失败并安排重试，超过上限后不再自动重试。
 func (q *Queries) FailOutboxTask(ctx context.Context, arg FailOutboxTaskParams) (OutboxTask, error) {
-	row := q.db.QueryRow(ctx, failOutboxTask, arg.ID, arg.Status, arg.Secs)
+	row := q.db.QueryRow(ctx, failOutboxTask,
+		arg.ID,
+		arg.Status,
+		arg.Secs,
+		arg.LastError,
+	)
 	var i OutboxTask
 	err := row.Scan(
 		&i.ID,
@@ -156,6 +219,8 @@ func (q *Queries) FailOutboxTask(ctx context.Context, arg FailOutboxTaskParams) 
 		&i.CreatedAt,
 		&i.ProjectID,
 		&i.DeliveryID,
+		&i.DedupeKey,
+		&i.LastError,
 	)
 	return i, err
 }

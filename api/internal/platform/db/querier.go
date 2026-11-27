@@ -12,9 +12,12 @@ import (
 )
 
 type Querier interface {
+	// 邮件专用领取，只处理 email.send，和 Webhook 任务分开扫描。
+	ClaimPendingEmailOutboxTasks(ctx context.Context, limit int32) ([]OutboxTask, error)
 	// 领取到期的待处理任务并标记为处理中，避免多实例重复消费。
+	// 邮件任务由独立 Worker 领取，这里排除 email.send，防止两边互相抢走任务。
 	ClaimPendingOutboxTasks(ctx context.Context, limit int32) ([]OutboxTask, error)
-	// 标记任务处理成功。
+	// 标记任务处理成功并清空错误信息。
 	CompleteOutboxTask(ctx context.Context, id uuid.UUID) (OutboxTask, error)
 	// 标记验证码已被使用，避免同一验证码重复核验。
 	ConsumeEmailVerificationCode(ctx context.Context, id uuid.UUID) (EmailVerificationCode, error)
@@ -74,6 +77,7 @@ type Querier interface {
 	// 创建组织，返回完整实体供 Handler 构造响应。
 	CreateOrganization(ctx context.Context, name string) (Organization, error)
 	// 创建异步任务，先落库再由 Worker 消费，避免消息丢失。
+	// dedupe_key 非空时按事件类型幂等，重复入队不会产生第二条任务。
 	CreateOutboxTask(ctx context.Context, arg CreateOutboxTaskParams) (OutboxTask, error)
 	// 创建项目，返回完整实体供 Handler 构造响应。
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
@@ -115,6 +119,8 @@ type Querier interface {
 	GetEvidenceItem(ctx context.Context, id uuid.UUID) (EvidenceItem, error)
 	// 读取项目最新版本基线，作为变更与交付的默认来源。
 	GetLatestBaseline(ctx context.Context, projectID uuid.UUID) (ScopeBaseline, error)
+	// 按邮箱读取最近一条待验证的验证码，用于累计错误尝试次数。
+	GetLatestEmailVerificationCodeByEmail(ctx context.Context, lower string) (EmailVerificationCode, error)
 	// 按 ID 读取里程碑，供更新与归属校验。
 	GetMilestone(ctx context.Context, id uuid.UUID) (Milestone, error)
 	// 读取单条异议。
@@ -137,6 +143,8 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	// 读取单条 Webhook 事件。
 	GetWebhook(ctx context.Context, id uuid.UUID) (Webhook, error)
+	// 记录一次错误的验证码尝试，达到上限后该验证码失效。
+	IncrementEmailVerificationAttempts(ctx context.Context, id uuid.UUID) error
 	// 判断用户是否为项目成员，供 Handler 做资源归属校验。
 	IsProjectMember(ctx context.Context, arg IsProjectMemberParams) (bool, error)
 	// 列出项目的 AI 建议，按创建时间倒序；类型传空字符串时返回全部类型。

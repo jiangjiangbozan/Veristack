@@ -15,6 +15,7 @@ const (
 	defaultMaxIdleConns  = 5
 	defaultLogLevel      = "info"
 	defaultServerAddr    = ":8080"
+	defaultPublicBaseURL = "http://localhost:5173"
 	defaultTimeout       = 15 * time.Second
 	defaultTokenExpiry   = 24 * time.Hour
 	defaultStorageDriver = "local"
@@ -82,9 +83,10 @@ type DatabaseConfig struct {
 
 // ServerConfig 描述 HTTP 服务监听参数。
 type ServerConfig struct {
-	Addr         string        // 监听地址
-	ReadTimeout  time.Duration // 请求读取超时
-	WriteTimeout time.Duration // 响应写入超时
+	Addr          string        // 监听地址
+	PublicBaseURL string        // 前端公网地址，用于邮件中的重置链接
+	ReadTimeout   time.Duration // 请求读取超时
+	WriteTimeout  time.Duration // 响应写入超时
 }
 
 // StorageConfig 描述对象存储参数。
@@ -106,11 +108,7 @@ func Load() (*Config, error) {
 			ExpiresIn: v.GetDuration("auth.expiresin"),
 			Secret:    v.GetString("auth.secret"),
 		},
-		Database: DatabaseConfig{
-			DSN:          v.GetString("database.dsn"),
-			MaxConns:     v.GetInt("database.maxconns"),
-			MaxIdleConns: v.GetInt("database.maxidleconns"),
-		},
+		Database: loadDatabase(v),
 		LogLevel: v.GetString("loglevel"),
 		SMTP: SMTPConfig{
 			Enabled:  v.GetBool("smtp.enabled"),
@@ -124,9 +122,10 @@ func Load() (*Config, error) {
 			Username: v.GetString("smtp.username"),
 		},
 		Server: ServerConfig{
-			Addr:         v.GetString("server.addr"),
-			ReadTimeout:  v.GetDuration("server.readtimeout"),
-			WriteTimeout: v.GetDuration("server.writetimeout"),
+			Addr:          v.GetString("server.addr"),
+			PublicBaseURL: v.GetString("server.publicbaseurl"),
+			ReadTimeout:   v.GetDuration("server.readtimeout"),
+			WriteTimeout:  v.GetDuration("server.writetimeout"),
 		},
 		Storage: StorageConfig{
 			Driver:    v.GetString("storage.driver"),
@@ -145,6 +144,24 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// LoadDatabase 读取数据库连接配置，供只执行迁移等无需完整服务配置的场景使用。
+func LoadDatabase() (DatabaseConfig, error) {
+	cfg := loadDatabase(newViper())
+	if cfg.DSN == "" {
+		return DatabaseConfig{}, fmt.Errorf("数据库 DSN 不能为空")
+	}
+	return cfg, nil
+}
+
+// loadDatabase 从统一配置源提取数据库连接参数，避免两处读取逻辑漂移。
+func loadDatabase(v *viper.Viper) DatabaseConfig {
+	return DatabaseConfig{
+		DSN:          v.GetString("database.dsn"),
+		MaxConns:     v.GetInt("database.maxconns"),
+		MaxIdleConns: v.GetInt("database.maxidleconns"),
+	}
 }
 
 // Validate 校验必填配置，让错误在服务启动阶段以可读信息暴露。
@@ -201,6 +218,7 @@ func newViper() *viper.Viper {
 	v.SetDefault("database.maxidleconns", defaultMaxIdleConns)
 	v.SetDefault("loglevel", defaultLogLevel)
 	v.SetDefault("server.addr", defaultServerAddr)
+	v.SetDefault("server.publicbaseurl", defaultPublicBaseURL)
 	v.SetDefault("server.readtimeout", defaultTimeout)
 	v.SetDefault("server.writetimeout", defaultTimeout)
 	v.SetDefault("smtp.port", defaultSMTPPort)

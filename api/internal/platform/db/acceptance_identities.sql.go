@@ -111,6 +111,41 @@ func (q *Queries) GetEmailVerificationCode(ctx context.Context, codeHash string)
 	return i, err
 }
 
+const getLatestEmailVerificationCodeByEmail = `-- name: GetLatestEmailVerificationCodeByEmail :one
+SELECT id, email, code_hash, attempts, expires_at, consumed_at, created_at FROM email_verification_codes
+WHERE lower(email) = lower($1) AND consumed_at IS NULL AND expires_at > now()
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+// 按邮箱读取最近一条待验证的验证码，用于累计错误尝试次数。
+func (q *Queries) GetLatestEmailVerificationCodeByEmail(ctx context.Context, lower string) (EmailVerificationCode, error) {
+	row := q.db.QueryRow(ctx, getLatestEmailVerificationCodeByEmail, lower)
+	var i EmailVerificationCode
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.CodeHash,
+		&i.Attempts,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const incrementEmailVerificationAttempts = `-- name: IncrementEmailVerificationAttempts :exec
+UPDATE email_verification_codes
+SET attempts = attempts + 1
+WHERE id = $1
+`
+
+// 记录一次错误的验证码尝试，达到上限后该验证码失效。
+func (q *Queries) IncrementEmailVerificationAttempts(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, incrementEmailVerificationAttempts, id)
+	return err
+}
+
 const markUserEmailVerified = `-- name: MarkUserEmailVerified :one
 UPDATE users
 SET email_verified_at = now()

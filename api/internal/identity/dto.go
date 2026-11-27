@@ -35,3 +35,25 @@ type LoginResponse struct {
 type MeResponse struct {
 	User views.UserView `json:"user"`
 }
+
+// ChangePasswordRequest 是修改密码请求体。
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword" validate:"required"`
+	NewPassword     string `json:"newPassword" validate:"required,min=8,max=128"`
+}
+
+// ForgotPasswordRequest 是申请密码重置邮件的请求体。
+type ForgotPasswordRequest struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+// ResetPasswordRequest 是使用一次性令牌重置密码的请求体。
+type ResetPasswordRequest struct {
+	NewPassword string `json:"newPassword" validate:"required,min=8,max=128"`
+	Token       string `json:"token" validate:"required"`
+}
+
+// VerifyEmailRequest 是提交邮箱验证码的请求体。
+type VerifyEmailRequest struct {
+	Code string `json:"code" validate:"required,len=6"`
+}

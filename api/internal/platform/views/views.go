@@ -72,15 +72,27 @@ type RequirementView struct {
 	Title              string    `json:"title"`              // 标题
 }
 
+// NotificationView 是一条站内通知的对外视图。
+type NotificationView struct {
+	Body      string    `json:"body"`      // 通知正文
+	CreatedAt string    `json:"createdAt"` // 创建时间
+	ID        uuid.UUID `json:"id"`        // 通知 ID
+	Link      string    `json:"link"`      // 站内跳转链接
+	ReadAt    string    `json:"readAt"`    // 阅读时间，未读为空
+	Title     string    `json:"title"`     // 通知标题
+	Type      string    `json:"type"`      // 事件类型
+}
+
 // UserView 是用户的对外视图，不含密码哈希。
 type UserView struct {
-	CreatedAt      string    `json:"createdAt"`      // 创建时间
-	DisplayName    string    `json:"displayName"`    // 显示名称
-	Email          string    `json:"email"`          // 邮箱
-	ID             uuid.UUID `json:"id"`             // 用户 ID
-	OrganizationID uuid.UUID `json:"organizationId"` // 所属组织
-	Role           string    `json:"role"`           // 角色
-	Status         string    `json:"status"`         // 状态
+	CreatedAt       string    `json:"createdAt"`       // 创建时间
+	DisplayName     string    `json:"displayName"`     // 显示名称
+	Email           string    `json:"email"`           // 邮箱
+	EmailVerifiedAt string    `json:"emailVerifiedAt"` // 邮箱验证时间，未验证为空
+	ID              uuid.UUID `json:"id"`              // 用户 ID
+	OrganizationID  uuid.UUID `json:"organizationId"`  // 所属组织
+	Role            string    `json:"role"`            // 角色
+	Status          string    `json:"status"`          // 状态
 }
 
 // AcceptanceCriterion 描述一条可验收条件。
@@ -171,13 +183,14 @@ func FromRequirement(model db.Requirement) RequirementView {
 // FromUser 把用户实体转换为不含敏感信息的视图。
 func FromUser(model db.User) UserView {
 	return UserView{
-		CreatedAt:      dbutil.TimeString(model.CreatedAt),
-		DisplayName:    model.DisplayName,
-		Email:          model.Email,
-		ID:             model.ID,
-		OrganizationID: model.OrganizationID,
-		Role:           model.Role,
-		Status:         model.Status,
+		CreatedAt:       dbutil.TimeString(model.CreatedAt),
+		DisplayName:     model.DisplayName,
+		Email:           model.Email,
+		EmailVerifiedAt: dbutil.NullableTimeString(model.EmailVerifiedAt),
+		ID:              model.ID,
+		OrganizationID:  model.OrganizationID,
+		Role:            model.Role,
+		Status:          model.Status,
 	}
 }
 
