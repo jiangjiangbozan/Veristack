@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: 后端测试与契约校验
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      - name: 检查 gofmt
+        run: test -z "$(gofmt -l .)"
+
+      - name: 运行 go vet
+        run: go vet ./...
+
+      - name: 校验 OpenAPI 逐字段契约
+        run: go test ./contracts/openapi -run 'TestOpenAPI' -count=1
+
+      - name: 运行单元测试
+        run: go test ./... -count=1
+
+      - name: 安装 sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+
+      - name: 校验 sqlc 生成代码无漂移
+        run: |
+          sqlc generate
+          git diff --exit-code -- internal/platform/db
+
+  frontend:
+    name: 前端 Lint 与构建
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 运行 ESLint
+        run: npm run lint
+
+      - name: 构建前端与类型检查
+        run: npm run build
