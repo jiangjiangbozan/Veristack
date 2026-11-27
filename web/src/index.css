@@ -19,19 +19,20 @@
 }
 
 .dark {
-  --background: oklch(0.17 0.018 250);
-  --foreground: oklch(0.96 0.005 250);
-  --surface: oklch(0.21 0.02 250);
-  --surface-muted: oklch(0.25 0.02 250);
-  --border: oklch(0.32 0.02 250);
-  --primary: oklch(0.68 0.14 255);
-  --primary-foreground: oklch(0.18 0.02 250);
-  --muted-foreground: oklch(0.7 0.02 250);
-  --success: oklch(0.72 0.13 155);
-  --warning: oklch(0.8 0.14 75);
-  --danger: oklch(0.7 0.18 25);
-  --info: oklch(0.72 0.12 235);
-  --ring: oklch(0.68 0.14 255 / 0.5);
+  /* 深色模式使用柔和的炭灰层级，而不是纯黑；提高表面、边框与次要文字的对比，避免“能看见但读不清”。 */
+  --background: oklch(0.19 0.012 250);
+  --foreground: oklch(0.97 0.005 250);
+  --surface: oklch(0.235 0.016 250);
+  --surface-muted: oklch(0.285 0.018 250);
+  --border: oklch(0.38 0.018 250);
+  --primary: oklch(0.72 0.14 255);
+  --primary-foreground: oklch(0.17 0.02 250);
+  --muted-foreground: oklch(0.79 0.015 250);
+  --success: oklch(0.76 0.13 155);
+  --warning: oklch(0.83 0.14 75);
+  --danger: oklch(0.73 0.18 25);
+  --info: oklch(0.77 0.12 235);
+  --ring: oklch(0.72 0.14 255 / 0.55);
 }
 
 @theme inline {
@@ -69,5 +70,201 @@
   select,
   textarea {
     font: inherit;
+  }
+}
+
+/* 落地页与状态页共用的轻量网格背景，使用语义色而不是固定灰值。 */
+.landing-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in oklch, var(--border) 48%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--border) 48%, transparent) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: linear-gradient(to bottom, black, transparent 82%);
+}
+
+/* 首屏光晕缓慢漂移，形成深色模式下也足够克制的层次感。 */
+.landing-aurora {
+  background:
+    radial-gradient(42rem 28rem at 16% 12%, color-mix(in oklch, var(--primary) 22%, transparent), transparent 66%),
+    radial-gradient(36rem 24rem at 82% 20%, color-mix(in oklch, var(--info) 16%, transparent), transparent 70%),
+    radial-gradient(30rem 22rem at 50% 88%, color-mix(in oklch, var(--success) 10%, transparent), transparent 72%);
+  animation: aurora-drift 18s ease-in-out infinite alternate;
+}
+
+.landing-float {
+  animation: landing-float 14s ease-in-out infinite;
+}
+
+.landing-float-delayed {
+  animation: landing-float 17s ease-in-out -6s infinite;
+}
+
+/* 产品验证状态的呼吸点，用来提示“正在核验”而不是装饰闪烁。 */
+.status-pulse {
+  animation: status-pulse 2.4s ease-in-out infinite;
+}
+
+/* 基础区块滚动入场，CSS 负责过渡，React 只负责触发。 */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1), transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reveal-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 交付快照轮播的切换动画；key 变化时重新触发。 */
+.snapshot-slide-enter {
+  animation: snapshot-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 鼠标跟随的柔光与轻微 3D 倾斜，只在鼠标设备上启用。 */
+.delivery-stage {
+  transform: perspective(1400px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  transform-style: preserve-3d;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.delivery-spotlight {
+  background: radial-gradient(
+    24rem circle at var(--pointer-x, 50%) var(--pointer-y, 50%),
+    color-mix(in oklch, var(--primary) 28%, transparent),
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity 0.3s ease-out;
+}
+
+.group:hover .delivery-spotlight,
+.group:focus-within .delivery-spotlight {
+  opacity: 0.65;
+}
+
+/* 使用场景的横向滚动带，悬停时暂停，方便阅读。 */
+.ticker-track {
+  animation: ticker-move 32s linear infinite;
+}
+
+.ticker-track:hover {
+  animation-play-state: paused;
+}
+
+/* 卡片高光描边，跟随悬停进入而不是整页常亮。 */
+.feature-card {
+  position: relative;
+  isolation: isolate;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.3s ease, background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.feature-card::after {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(135deg, color-mix(in oklch, var(--primary) 10%, transparent), transparent 45%);
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.feature-card:hover {
+  border-color: color-mix(in oklch, var(--primary) 42%, var(--border));
+  box-shadow: 0 20px 55px -38px var(--primary);
+  transform: translateY(-4px);
+}
+
+.feature-card:hover::after {
+  opacity: 1;
+}
+
+@keyframes aurora-drift {
+  from {
+    transform: translate3d(-2%, -1%, 0) scale(1);
+    opacity: 0.72;
+  }
+  to {
+    transform: translate3d(2%, 2%, 0) scale(1.06);
+    opacity: 1;
+  }
+}
+
+@keyframes landing-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -18px, 0);
+  }
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--success) 36%, transparent);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 0 5px transparent;
+    opacity: 0.72;
+  }
+}
+
+@keyframes snapshot-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ticker-move {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    /* 轨道渲染 4 组，每次只移动一组；剩余 3 组始终能覆盖视口，避免右侧出现空白。 */
+    transform: translateX(-25%);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-aurora,
+  .landing-float,
+  .landing-float-delayed,
+  .status-pulse,
+  .snapshot-slide-enter,
+  .ticker-track {
+    animation: none;
+  }
+
+  .delivery-stage {
+    transform: none;
+    transition: none;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .feature-card,
+  .feature-card:hover {
+    transform: none;
+    transition: none;
   }
 }

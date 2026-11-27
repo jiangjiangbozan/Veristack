@@ -6,6 +6,7 @@ export interface UserView {
   createdAt: string
   displayName: string
   email: string
+  emailVerifiedAt: string
   id: string
   organizationId: string
   role: UserRole
@@ -55,6 +56,13 @@ export interface BaselineView {
   projectId: string
   requirements: RequirementView[]
   version: number
+}
+
+/** 两个基线之间的需求差异。 */
+export interface BaselineDiff {
+  added: RequirementView[]
+  modified: RequirementView[]
+  removed: RequirementView[]
 }
 
 /** 变更申请视图。 */

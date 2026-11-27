@@ -36,7 +36,42 @@ export function fetchCurrentUser(): Promise<{ user: UserView }> {
   return request<{ user: UserView }>('/auth/me')
 }
 
-/** 退出登录，清除本地令牌。 */
-export function logout(): void {
-  clearAccessToken()
+/** 退出登录：先通知服务端撤销会话，再清除本地令牌。 */
+export async function logout(): Promise<void> {
+  try {
+    await request('/auth/logout', { body: '{}', method: 'POST' })
+  } finally {
+    clearAccessToken()
+  }
+}
+
+/** 修改当前用户密码。 */
+export function changePassword(currentPassword: string, newPassword: string): Promise<{ changed: boolean }> {
+  return request('/auth/password', {
+    body: JSON.stringify({ currentPassword, newPassword }),
+    method: 'POST',
+  })
+}
+
+/** 申请密码重置邮件。 */
+export function forgotPassword(email: string): Promise<{ sent: boolean }> {
+  return request('/auth/password/forgot', { body: JSON.stringify({ email }), method: 'POST' })
+}
+
+/** 使用一次性令牌重置密码。 */
+export function resetPassword(token: string, newPassword: string): Promise<{ reset: boolean }> {
+  return request('/auth/password/reset', {
+    body: JSON.stringify({ newPassword, token }),
+    method: 'POST',
+  })
+}
+
+/** 为当前用户邮箱申请验证码。 */
+export function requestEmailVerificationCode(): Promise<{ sent: boolean }> {
+  return request('/auth/email/verification-code', { body: '{}', method: 'POST' })
+}
+
+/** 提交邮箱验证码。 */
+export function verifyEmail(code: string): Promise<{ user: UserView }> {
+  return request('/auth/email/verify', { body: JSON.stringify({ code }), method: 'POST' })
 }
