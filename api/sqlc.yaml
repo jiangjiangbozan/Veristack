@@ -2,7 +2,18 @@ version: '2'
 sql:
   - engine: postgresql
     queries: sql/queries
-    schema: migrations
+    # 010 是纯 COMMENT 迁移，不改变表结构；目录扫描会解析 Goose 内部表 goose_db_version 并报错。
+    # 新增结构迁移时，必须同步把文件追加到下面的 schema 列表。
+    schema:
+      - migrations/001_init.sql
+      - migrations/002_change_snapshot.sql
+      - migrations/003_phase2_acceptance.sql
+      - migrations/004_phase3_automation.sql
+      - migrations/005_evidence_fingerprint.sql
+      - migrations/006_customer_email_verification.sql
+      - migrations/007_account_security.sql
+      - migrations/008_notifications.sql
+      - migrations/009_outbox_email.sql
     gen:
       go:
         package: db
