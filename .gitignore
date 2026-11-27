@@ -26,6 +26,13 @@ data/
 *.log
 logs/
 
+# 本地缓存与测试产物
+web/.vite/
+coverage/
+playwright-report/
+test-results/
+*.pprof
+
 # 编辑器与工具目录
 .vscode/
 .idea/
