@@ -4,7 +4,9 @@ package delivery
 import (
 	"context"
 	"crypto/ed25519"
+	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -14,9 +16,15 @@ import (
 	"api/internal/platform/db"
 	"api/internal/platform/errs"
 	"api/internal/platform/idparse"
+	"api/internal/platform/pack"
 	"api/internal/platform/response"
 	"api/internal/platform/validate"
 	"api/internal/platform/views"
+)
+
+const (
+	downloadFilenamePattern = "veristack-delivery-v%d-%s.zip"
+	downloadTempPattern     = "veristack-pack-*.zip"
 )
 
 // Handler 提供交付版本相关的 HTTP 接口。
@@ -33,10 +41,40 @@ func (h *Handler) Routes(r chi.Router) {
 	})
 	r.Route("/deliveries/{deliveryId}", func(r chi.Router) {
 		r.Get("/", h.get)
+		r.Get("/audit-events", h.auditEvents)
 		r.Get("/manifest", h.getManifest)
+		r.Get("/packs/{exportId}/download", h.downloadPack)
 		r.Post("/submit", h.submit)
 		r.Post("/pack", h.exportPack)
 	})
+}
+
+// auditEvents 返回交付版本的操作审计时间线，供开发者还原交付全过程。
+func (h *Handler) auditEvents(w http.ResponseWriter, r *http.Request) {
+	deliveryID, err := idparse.FromURL(r, "deliveryId")
+	if err != nil {
+		response.Fail(w, errs.BadRequest(err.Error(), err))
+		return
+	}
+	principal, _, err := h.principal(r)
+	if err != nil {
+		response.Fail(w, err)
+		return
+	}
+	delivery, err := h.Service.Get(r.Context(), deliveryID)
+	if err != nil {
+		response.Fail(w, err)
+		return
+	}
+	if err := h.ensureDelivery(w, r, delivery, principal); err != nil {
+		return
+	}
+	items, err := h.Service.ListAuditEvents(r.Context(), deliveryID)
+	if err != nil {
+		response.Fail(w, err)
+		return
+	}
+	response.OK(w, ListAuditEventsResponse{Items: items})
 }
 
 // exportPack 导出 Evidence Pack，供客户或第三方独立核验交付内容。
@@ -59,17 +97,88 @@ func (h *Handler) exportPack(w http.ResponseWriter, r *http.Request) {
 	if err := h.ensureDelivery(w, r, delivery, principal); err != nil {
 		return
 	}
-	root, manifestSHA, signed, err := h.Service.ExportPack(r.Context(), deliveryID, h.SigningKey, principal.OrganizationID)
+	exported, err := h.Service.ExportPack(r.Context(), deliveryID, h.SigningKey, principal.OrganizationID)
 	if err != nil {
 		response.Fail(w, err)
 		return
 	}
+	if err := h.recordAudit(r.Context(), r, principal, "delivery.export", deliveryID, nil, map[string]any{
+		"exportId":       exported.ExportID,
+		"manifestSha256": exported.ManifestSHA,
+		"signed":         exported.Signed,
+	}); err != nil {
+		response.Fail(w, err)
+		return
+	}
 	response.OK(w, PackResponse{
-		DownloadURL: "/api/v1/deliveries/" + deliveryID.String() + "/pack/download",
-		ManifestSHA: manifestSHA,
-		PackPath:    root,
-		Signed:      signed,
+		DownloadURL: "/api/v1/deliveries/" + deliveryID.String() + "/packs/" + exported.ExportID + "/download",
+		ExportID:    exported.ExportID,
+		ManifestSHA: exported.ManifestSHA,
+		PackPath:    exported.Root,
+		Signed:      exported.Signed,
 	})
+}
+
+// downloadPack 把指定导出快照打包为 ZIP 下载，支持客户在本地独立核验。
+func (h *Handler) downloadPack(w http.ResponseWriter, r *http.Request) {
+	deliveryID, exportID, delivery, ok := h.downloadTarget(w, r)
+	if !ok {
+		return
+	}
+	root, err := h.Service.PackArchivePath(r.Context(), deliveryID, exportID)
+	if err != nil {
+		response.Fail(w, err)
+		return
+	}
+	archive, err := os.CreateTemp("", downloadTempPattern)
+	if err != nil {
+		response.Fail(w, errs.Internal(err))
+		return
+	}
+	defer func() {
+		_ = archive.Close()
+		_ = os.Remove(archive.Name())
+	}()
+	if err := pack.WriteArchive(root, archive); err != nil {
+		response.Fail(w, errs.Internal(err))
+		return
+	}
+	if err := archive.Close(); err != nil {
+		response.Fail(w, errs.Internal(err))
+		return
+	}
+	filename := fmt.Sprintf(downloadFilenamePattern, delivery.Version, exportID.String()[:8])
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	http.ServeFile(w, r, archive.Name())
+}
+
+// downloadTarget 解析导出编号并校验交付归属，失败时已写入错误响应。
+func (h *Handler) downloadTarget(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, db.Delivery, bool) {
+	deliveryID, err := idparse.FromURL(r, "deliveryId")
+	if err != nil {
+		response.Fail(w, errs.BadRequest(err.Error(), err))
+		return uuid.Nil, uuid.Nil, db.Delivery{}, false
+	}
+	exportID, err := uuid.Parse(chi.URLParam(r, "exportId"))
+	if err != nil {
+		response.Fail(w, errs.BadRequest("导出编号格式无效", err))
+		return uuid.Nil, uuid.Nil, db.Delivery{}, false
+	}
+	principal, _, err := h.principal(r)
+	if err != nil {
+		response.Fail(w, err)
+		return uuid.Nil, uuid.Nil, db.Delivery{}, false
+	}
+	delivery, err := h.Service.Get(r.Context(), deliveryID)
+	if err != nil {
+		response.Fail(w, err)
+		return uuid.Nil, uuid.Nil, db.Delivery{}, false
+	}
+	if err := h.ensureDelivery(w, r, delivery, principal); err != nil {
+		return uuid.Nil, uuid.Nil, db.Delivery{}, false
+	}
+	return deliveryID, exportID, delivery, true
 }
 
 // create 创建交付版本并冻结交付清单。

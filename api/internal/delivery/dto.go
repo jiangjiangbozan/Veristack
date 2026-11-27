@@ -29,6 +29,11 @@ type ListDeliveriesResponse struct {
 	Items []views.DeliveryView `json:"items"`
 }
 
+// ListAuditEventsResponse 是交付审计时间线响应。
+type ListAuditEventsResponse struct {
+	Items []views.AuditEventView `json:"items"`
+}
+
 // ManifestCriterion 是交付清单中的单条验收条件。
 type ManifestCriterion struct {
 	Description     string `json:"description"`     // 条件描述
@@ -63,6 +68,7 @@ type SubmitDeliveryResponse struct {
 // PackResponse 是导出 Evidence Pack 的响应，给出打包文件与清单摘要。
 type PackResponse struct {
 	DownloadURL string `json:"downloadUrl"`    // 打包文件下载地址
+	ExportID    string `json:"exportId"`       // 导出编号，用于定位独立快照
 	ManifestSHA string `json:"manifestSha256"` // 交付清单摘要
 	PackPath    string `json:"packPath"`       // Pack 在服务端的存放路径
 	Signed      bool   `json:"signed"`         // 是否附带签名

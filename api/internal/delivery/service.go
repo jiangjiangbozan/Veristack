@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"api/internal/platform/database"
@@ -24,8 +26,10 @@ import (
 )
 
 const (
-	statusDraft   = "draft"
-	statusPending = "pending"
+	auditObjectAcceptance = "acceptance"
+	auditObjectDelivery   = "delivery"
+	statusDraft           = "draft"
+	statusPending         = "pending"
 )
 
 // Service 提供交付版本相关的业务方法。
@@ -107,6 +111,52 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, limit, offset i
 	})
 }
 
+// ListAuditEvents 返回与交付相关的审计事件，按发生时间倒序。
+//
+// 交付生命周期与客户分享动作分别以 delivery、acceptance 作为对象类型，
+// 两者都用交付 ID 作为对象 ID，因此按对象过滤后在内存中合并。
+// 单个交付的审计事件数量有界，不属于全表扫描；返回全部事件便于时间线完整还原。
+func (s *Service) ListAuditEvents(ctx context.Context, deliveryID uuid.UUID) ([]views.AuditEventView, error) {
+	queries := database.Queries(ctx, s.Database)
+	deliveryEvents, err := queries.ListAuditEventsByObject(ctx, db.ListAuditEventsByObjectParams{
+		ObjectType: auditObjectDelivery,
+		ObjectID:   deliveryID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("查询交付审计事件失败: %w", err)
+	}
+	acceptanceEvents, err := queries.ListAuditEventsByObject(ctx, db.ListAuditEventsByObjectParams{
+		ObjectType: auditObjectAcceptance,
+		ObjectID:   deliveryID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("查询验收审计事件失败: %w", err)
+	}
+	events := mergeAuditEvents(deliveryEvents, acceptanceEvents)
+	displayNames := s.actorNames(ctx, events)
+	result := make([]views.AuditEventView, 0, len(events))
+	for _, event := range events {
+		result = append(result, views.FromAuditEvent(event, displayNames[auditActorKey(event.ActorID)]))
+	}
+	return result, nil
+}
+
+// PackArchivePath 返回指定导出目录的本地路径，供流式下载 ZIP 使用。
+//
+// 只接受交付 ID 与导出 ID 两个 UUID 组成的目录，路径不可能逃出 Pack 根目录；
+// 目录不存在时按未导出处理，避免把服务端文件系统细节暴露给调用方。
+func (s *Service) PackArchivePath(ctx context.Context, deliveryID, exportID uuid.UUID) (string, error) {
+	if _, err := s.Get(ctx, deliveryID); err != nil {
+		return "", err
+	}
+	root := filepath.Join(s.PackRoot, deliveryID.String(), exportID.String())
+	info, err := os.Lstat(root)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", errs.NotFound("证据包不存在或尚未导出", err)
+	}
+	return root, nil
+}
+
 // Submit 把草稿交付提交为待验收状态。
 func (s *Service) Submit(ctx context.Context, id uuid.UUID) (db.Delivery, error) {
 	delivery, err := database.Queries(ctx, s.Database).SubmitDelivery(ctx, id)
@@ -168,37 +218,50 @@ func hashManifest(snapshot []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// PackExport 描述一次 Evidence Pack 导出的结果。
+type PackExport struct {
+	ExportID    string // 导出编号，用于定位独立快照
+	ManifestSHA string // 交付清单摘要
+	Root        string // 导出目录的本地路径
+	Signed      bool   // 是否附带签名
+}
+
 // ExportPack 把交付版本与其证据打包为 Evidence Pack，便于外部独立核验。
 //
 // 每次导出分配独立目录，写入临时目录校验通过后再原子发布，
 // 保证历史导出不会被覆盖，与「证据快照不可覆盖」的产品设计一致。
-func (s *Service) ExportPack(ctx context.Context, id uuid.UUID, privateKey ed25519.PrivateKey, organizationID uuid.UUID) (string, string, bool, error) {
+func (s *Service) ExportPack(ctx context.Context, id uuid.UUID, privateKey ed25519.PrivateKey, organizationID uuid.UUID) (PackExport, error) {
 	delivery, err := s.Get(ctx, id)
 	if err != nil {
-		return "", "", false, err
+		return PackExport{}, err
 	}
 	items, err := database.Queries(ctx, s.Database).ListEvidenceByDelivery(ctx, dbutil.NullableUUID(id))
 	if err != nil {
-		return "", "", false, fmt.Errorf("查询交付证据失败: %w", err)
+		return PackExport{}, fmt.Errorf("查询交付证据失败: %w", err)
 	}
-	exportID := uuid.New().String()
-	finalRoot := filepath.Join(s.PackRoot, delivery.ID.String(), exportID)
+	exportID := uuid.New()
+	finalRoot := filepath.Join(s.PackRoot, delivery.ID.String(), exportID.String())
 	stagingRoot := finalRoot + ".staging"
 	if err := os.MkdirAll(stagingRoot, 0o750); err != nil {
-		return "", "", false, fmt.Errorf("创建 Pack 临时目录失败: %w", err)
+		return PackExport{}, fmt.Errorf("创建 Pack 临时目录失败: %w", err)
 	}
 	defer os.RemoveAll(stagingRoot)
 	meta, err := s.buildPack(ctx, stagingRoot, delivery, items, privateKey, organizationID)
 	if err != nil {
-		return "", "", false, err
+		return PackExport{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(finalRoot), 0o750); err != nil {
-		return "", "", false, fmt.Errorf("创建 Pack 目录失败: %w", err)
+		return PackExport{}, fmt.Errorf("创建 Pack 目录失败: %w", err)
 	}
 	if err := os.Rename(stagingRoot, finalRoot); err != nil {
-		return "", "", false, fmt.Errorf("发布 Pack 目录失败: %w", err)
+		return PackExport{}, fmt.Errorf("发布 Pack 目录失败: %w", err)
 	}
-	return finalRoot, meta.Manifest.SHA256, meta.Signature != nil, nil
+	return PackExport{
+		ExportID:    exportID.String(),
+		ManifestSHA: meta.Manifest.SHA256,
+		Root:        finalRoot,
+		Signed:      meta.Signature != nil,
+	}, nil
 }
 
 // buildPack 组装 Pack 内容并写入元数据，附件从对象存储复制进 Pack。
@@ -259,4 +322,56 @@ func (s *Service) projectName(ctx context.Context, projectID uuid.UUID) string {
 		return ""
 	}
 	return project.Name
+}
+
+// mergeAuditEvents 合并多组审计事件并按发生时间倒序排列。
+//
+// 同一时刻的事件保持原有顺序，避免刷新时间线时条目位置跳动；
+// 交付与验收事件分别来自两个对象查询，合并逻辑独立成纯函数便于测试。
+func mergeAuditEvents(groups ...[]db.AuditEvent) []db.AuditEvent {
+	total := 0
+	for _, group := range groups {
+		total += len(group)
+	}
+	events := make([]db.AuditEvent, 0, total)
+	for _, group := range groups {
+		events = append(events, group...)
+	}
+	sort.SliceStable(events, func(left, right int) bool {
+		return events[left].OccurredAt.After(events[right].OccurredAt)
+	})
+	return events
+}
+
+// actorNames 批量解析审计事件的操作人显示名称。
+//
+// 同一交付的操作人通常只有少数几位，先去重再逐个读取用户，
+// 避免为每条审计事件重复查询；用户已删除时保留空名称，前端回退为「已移除成员」。
+func (s *Service) actorNames(ctx context.Context, events []db.AuditEvent) map[string]string {
+	queries := database.Queries(ctx, s.Database)
+	names := make(map[string]string, len(events))
+	for _, event := range events {
+		key := auditActorKey(event.ActorID)
+		if key == "" {
+			continue
+		}
+		if _, resolved := names[key]; resolved {
+			continue
+		}
+		user, err := queries.GetUserByID(ctx, uuid.UUID(event.ActorID.Bytes))
+		if err != nil {
+			names[key] = ""
+			continue
+		}
+		names[key] = user.DisplayName
+	}
+	return names
+}
+
+// auditActorKey 把可空操作人 ID 转为映射键，系统操作返回空串。
+func auditActorKey(actorID pgtype.UUID) string {
+	if !actorID.Valid {
+		return ""
+	}
+	return uuid.UUID(actorID.Bytes).String()
 }

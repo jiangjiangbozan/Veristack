@@ -71,9 +71,18 @@ func (h *Handler) analyzeChangeImpact(w http.ResponseWriter, r *http.Request) {
 		response.Fail(w, errs.BadRequest(err.Error(), err))
 		return
 	}
-	change, err := db.New(h.Service.Database).GetChangeRequest(r.Context(), uuid.MustParse(req.ChangeRequestID))
+	changeID, err := uuid.Parse(req.ChangeRequestID)
+	if err != nil {
+		response.Fail(w, errs.BadRequest("变更申请 ID 无效", err))
+		return
+	}
+	change, err := db.New(h.Service.Database).GetChangeRequest(r.Context(), changeID)
 	if err != nil {
 		response.Fail(w, errs.NotFound("变更申请不存在", err))
+		return
+	}
+	if change.ProjectID != projectID {
+		response.Fail(w, errs.NotFound("变更申请不属于当前项目", nil))
 		return
 	}
 	baseline, err := db.New(h.Service.Database).GetScopeBaseline(r.Context(), change.BaselineID)
@@ -171,6 +180,10 @@ func (h *Handler) generateSummary(w http.ResponseWriter, r *http.Request) {
 	delivery, err := db.New(h.Service.Database).GetDelivery(r.Context(), deliveryID)
 	if err != nil {
 		response.Fail(w, errs.NotFound("交付版本不存在", err))
+		return
+	}
+	if delivery.ProjectID != projectID {
+		response.Fail(w, errs.NotFound("交付版本不属于当前项目", nil))
 		return
 	}
 	suggestion, err := h.Service.GenerateDeliverySummary(r.Context(), projectID, string(delivery.ManifestJson))

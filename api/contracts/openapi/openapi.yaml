@@ -37,6 +37,8 @@ tags:
     description: 客户验收与异议闭环
   - name: Integration
     description: Webhook、CI 报告与 AI 建议
+  - name: Notification
+    description: 站内通知与未读状态
 
 paths:
   /healthz:
@@ -60,6 +62,35 @@ paths:
                           status:
                             type: string
                             description: 存活状态
+
+  /readyz:
+    get:
+      tags: [System]
+      summary: 服务就绪检查
+      description: 检查数据库连通性，失败时返回 503，供容器编排判断是否可以接收流量。
+      security: []
+      responses:
+        '200':
+          description: 服务就绪
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            type: string
+                            description: 就绪状态
+        '503':
+          description: 数据库暂不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
 
   /auth/register:
     post:
@@ -121,6 +152,8 @@ paths:
                         $ref: '#/components/schemas/AuthResult'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /auth/me:
     get:
@@ -141,6 +174,240 @@ paths:
                         properties:
                           user:
                             $ref: '#/components/schemas/User'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: 退出登录并撤销此前签发的会话
+      responses:
+        '200':
+          description: 已退出
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/password:
+    post:
+      tags: [Auth]
+      summary: 修改当前用户密码
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                  description: 当前密码
+                newPassword:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                  description: 新密码
+      responses:
+        '200':
+          description: 密码已更新，旧会话失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/password/forgot:
+    post:
+      tags: [Auth]
+      summary: 申请密码重置邮件
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: 注册邮箱
+      responses:
+        '200':
+          description: 已受理；邮箱不存在时同样返回成功，避免枚举账号
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/password/reset:
+    post:
+      tags: [Auth]
+      summary: 使用一次性令牌重置密码
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, newPassword]
+              properties:
+                token:
+                  type: string
+                  description: 邮件中的一次性重置令牌
+                newPassword:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                  description: 新密码
+      responses:
+        '200':
+          description: 密码已重置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/email/verification-code:
+    post:
+      tags: [Auth]
+      summary: 为当前用户邮箱申请验证码
+      responses:
+        '200':
+          description: 验证码已发送
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/email/verify:
+    post:
+      tags: [Auth]
+      summary: 提交邮箱验证码
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+                  description: 6 位数字验证码
+      responses:
+        '200':
+          description: 邮箱已验证
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          user:
+                            $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications:
+    get:
+      tags: [Notification]
+      summary: 分页列出当前用户的站内通知
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 通知列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/unread-count:
+    get:
+      tags: [Notification]
+      summary: 查询未读通知数量
+      responses:
+        '200':
+          description: 未读数量
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/read-all:
+    post:
+      tags: [Notification]
+      summary: 把全部未读通知标记为已读
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/{notificationId}/read:
+    post:
+      tags: [Notification]
+      summary: 把一条通知标记为已读
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 已标记
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /projects:
     get:
@@ -190,6 +457,32 @@ paths:
                         properties:
                           project:
                             $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /projects/import:
+    post:
+      tags: [Project]
+      summary: 导入已有项目、首版基线与里程碑
+      description: 在同一个请求事务中创建项目、需求基线、需求与里程碑，任一校验失败都会整体回滚。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportProjectRequest'
+      responses:
+        '200':
+          description: 导入成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ImportProjectResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
 
@@ -320,7 +613,45 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Envelope'
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          member:
+                            $ref: '#/components/schemas/Member'
+
+  /projects/{projectId}/members/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 要移除的组织用户 ID
+    delete:
+      tags: [Project]
+      summary: 移除项目成员
+      description: 仅组织 owner 可操作，不能移除项目创建者。
+      responses:
+        '200':
+          description: 移除成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          deleted:
+                            type: boolean
 
   /projects/{projectId}/scope-baselines:
     parameters:
@@ -735,7 +1066,7 @@ paths:
     post:
       tags: [Delivery]
       summary: 导出 Evidence Pack
-      description: 把交付清单与证据附件打包，配置签名私钥时附带 Ed25519 签名，可离线独立核验。
+      description: 把交付清单与证据附件打包为独立快照，返回 exportId 与下载地址；配置签名私钥时附带 Ed25519 签名。
       responses:
         '200':
           description: 导出成功
@@ -743,6 +1074,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Envelope'
+
+  /deliveries/{deliveryId}/audit-events:
+    parameters:
+      - name: deliveryId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 交付版本 ID
+    get:
+      tags: [Delivery]
+      summary: 列出交付操作审计时间线
+      description: 返回交付生命周期与客户分享动作的审计事件，按发生时间倒序；单个交付的事件数量有界，不分页。
+      responses:
+        '200':
+          description: 审计事件列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/AuditEvent'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /deliveries/{deliveryId}/packs/{exportId}/download:
+    parameters:
+      - name: deliveryId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 交付版本 ID
+      - name: exportId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 导出编号，由导出接口返回
+    get:
+      tags: [Delivery]
+      summary: 下载 Evidence Pack ZIP
+      description: 把指定导出快照流式打包为 ZIP，需携带访问令牌；历史导出互不覆盖，必须按导出编号下载。
+      responses:
+        '200':
+          description: ZIP 文件
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /deliveries/{deliveryId}/evidence:
     parameters:
@@ -819,6 +1214,30 @@ paths:
                 $ref: '#/components/schemas/Envelope'
         '400':
           $ref: '#/components/responses/BadRequest'
+
+  /evidence/{evidenceId}/file:
+    parameters:
+      - name: evidenceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 证据 ID
+    get:
+      tags: [Evidence]
+      summary: 下载证据附件
+      description: 仅返回已登记附件且属于当前组织的证据文件。
+      responses:
+        '200':
+          description: 附件内容
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /projects/{projectId}/evidence:
     parameters:
@@ -959,6 +1378,79 @@ paths:
                 $ref: '#/components/schemas/Envelope'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /share/{token}/verification-code:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 分享令牌明文
+    post:
+      tags: [Acceptance]
+      summary: 申请客户邮箱验证码
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: 验收人邮箱
+      responses:
+        '200':
+          description: 验证码已发送
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /share/{token}/verify:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 分享令牌明文
+    post:
+      tags: [Acceptance]
+      summary: 校验客户邮箱验证码
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, email]
+              properties:
+                code:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+                  description: 六位验证码
+                email:
+                  type: string
+                  format: email
+                  description: 验收人邮箱
+      responses:
+        '200':
+          description: 验证通过
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /share/{token}/verdicts/{criterionKey}:
     parameters:
@@ -1350,6 +1842,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/AppError'
+    TooManyRequests:
+      description: 请求过于频繁，请稍后再试
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AppError'
     Unauthorized:
       description: 未认证或签名校验失败
       content:
@@ -1381,6 +1879,38 @@ components:
         success:
           type: boolean
           description: 是否成功
+
+    AuditEvent:
+      type: object
+      required: [action, actorId, actorName, id, ip, objectId, objectType, occurredAt]
+      properties:
+        action:
+          type: string
+          description: 动作标识，例如 delivery.submit
+        actorId:
+          type: string
+          description: 操作人 ID，系统操作时为空串
+        actorName:
+          type: string
+          description: 操作人显示名称，用户已删除时为空串
+        id:
+          type: string
+          format: uuid
+          description: 审计事件 ID
+        ip:
+          type: string
+          description: 来源 IP
+        objectId:
+          type: string
+          format: uuid
+          description: 被操作对象 ID
+        objectType:
+          type: string
+          description: 被操作对象类型
+        occurredAt:
+          type: string
+          format: date-time
+          description: 发生时间（上海时区）
 
     AppError:
       type: object
@@ -1417,6 +1947,34 @@ components:
         user:
           $ref: '#/components/schemas/User'
 
+    Notification:
+      type: object
+      required: [id, type, title, body, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: 通知 ID
+        type:
+          type: string
+          description: 事件类型
+        title:
+          type: string
+          description: 通知标题
+        body:
+          type: string
+          description: 通知正文
+        link:
+          type: string
+          description: 站内跳转链接
+        readAt:
+          type: string
+          format: date-time
+          description: 阅读时间，未读为空
+        createdAt:
+          type: string
+          format: date-time
+          description: 创建时间
     User:
       type: object
       required: [id, email, displayName, role]
@@ -1432,6 +1990,10 @@ components:
           type: string
           format: email
           description: 邮箱
+        emailVerifiedAt:
+          type: string
+          format: date-time
+          description: 邮箱验证时间，未验证时为空
         id:
           type: string
           format: uuid
@@ -1542,6 +2104,54 @@ components:
           type: string
           format: date
           description: 开始日期
+
+    ImportProjectRequest:
+      type: object
+      required: [project]
+      properties:
+        project:
+          $ref: '#/components/schemas/CreateProjectRequest'
+        requirements:
+          type: array
+          description: 初始需求列表，导入时冻结为 v1 基线
+          items:
+            $ref: '#/components/schemas/RequirementInput'
+        milestones:
+          type: array
+          description: 可选的里程碑列表，用需求编号关联基线需求
+          items:
+            $ref: '#/components/schemas/ImportMilestone'
+
+    ImportMilestone:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          description: 里程碑名称
+        requirementCodes:
+          type: array
+          description: 关联的需求编号
+          items:
+            type: string
+            maxLength: 30
+        targetDate:
+          type: string
+          format: date
+          description: 目标完成日期
+
+    ImportProjectResponse:
+      type: object
+      properties:
+        milestoneCount:
+          type: integer
+          description: 已创建的里程碑数量
+        project:
+          $ref: '#/components/schemas/Project'
+        requirementCount:
+          type: integer
+          description: 已创建的需求数量
 
     UpdateProjectRequest:
       allOf:

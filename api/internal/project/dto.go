@@ -5,6 +5,7 @@ import (
 	"github.com/google/uuid"
 
 	"api/internal/platform/views"
+	"api/internal/scope"
 )
 
 // CreateProjectRequest 是创建项目的请求体。
@@ -15,6 +16,27 @@ type CreateProjectRequest struct {
 	EndDate     string `json:"endDate"`
 	Name        string `json:"name" validate:"required,max=120"`
 	StartDate   string `json:"startDate"`
+}
+
+// ImportProjectRequest 是导入已有项目的请求体，一次事务内创建项目、基线、需求与里程碑。
+type ImportProjectRequest struct {
+	Milestones   []ImportMilestone        `json:"milestones" validate:"dive"`   // 可选的里程碑列表
+	Project      CreateProjectRequest     `json:"project" validate:"required"`  // 项目基本信息
+	Requirements []scope.RequirementInput `json:"requirements" validate:"dive"` // 可选的初始需求列表
+}
+
+// ImportMilestone 是导入项目时的里程碑输入，用需求编号关联基线需求。
+type ImportMilestone struct {
+	Name             string   `json:"name" validate:"required,max=120"`        // 里程碑名称
+	RequirementCodes []string `json:"requirementCodes" validate:"dive,max=30"` // 关联需求编号
+	TargetDate       string   `json:"targetDate"`                              // 目标日期
+}
+
+// ImportProjectResponse 是项目导入结果。
+type ImportProjectResponse struct {
+	MilestoneCount   int               `json:"milestoneCount"`   // 创建的里程碑数量
+	Project          views.ProjectView `json:"project"`          // 创建的项目
+	RequirementCount int               `json:"requirementCount"` // 创建的需求数量
 }
 
 // CreateProjectResponse 是创建项目响应。

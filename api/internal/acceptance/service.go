@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"api/internal/notification"
 	"api/internal/platform/auth"
 	"api/internal/platform/database"
 	"api/internal/platform/db"
@@ -33,7 +34,8 @@ const (
 
 // Service 提供验收相关的业务方法。
 type Service struct {
-	Database *pgxpool.Pool // 数据库连接池
+	Database *pgxpool.Pool          // 数据库连接池
+	Notifier notification.Publisher // 站内与邮件通知，可为空
 }
 
 // CountOpenObjections 统计交付版本中待处理的异议数量。
@@ -111,6 +113,7 @@ func (s *Service) ReplyToObjection(ctx context.Context, objectionID, authorID uu
 	if err != nil {
 		return db.ObjectionReply{}, fmt.Errorf("回复异议失败: %w", err)
 	}
+	s.notifyObjectionReply(ctx, objectionID, content)
 	return reply, nil
 }
 
@@ -161,10 +164,15 @@ func (s *Service) SubmitDecision(ctx context.Context, deliveryID uuid.UUID, req 
 	if req.Decision == decisionReject {
 		status = statusRejected
 	}
-	return database.Queries(ctx, s.Database).UpdateDeliveryStatus(ctx, db.UpdateDeliveryStatusParams{
+	updated, err := database.Queries(ctx, s.Database).UpdateDeliveryStatus(ctx, db.UpdateDeliveryStatusParams{
 		ID:     deliveryID,
 		Status: status,
 	})
+	if err != nil {
+		return db.Delivery{}, err
+	}
+	s.notifyDecision(ctx, delivery, customer, req, status)
+	return updated, nil
 }
 
 // EnsureCustomer 确认或创建客户账号，使验收结论可归因到具体客户。
@@ -197,6 +205,51 @@ func (s *Service) EnsureCustomer(ctx context.Context, projectID uuid.UUID, email
 		OrganizationID: project.OrganizationID,
 		PasswordHash:   passwordHash,
 		Role:           roleCustomer,
+	})
+}
+
+// notifyDecision 把客户最终结论通知给项目负责人；通知失败不影响验收主流程。
+func (s *Service) notifyDecision(ctx context.Context, delivery db.Delivery, customer db.User, req SubmitDecisionRequest, status string) {
+	if s.Notifier == nil {
+		return
+	}
+	title := "客户已确认验收通过"
+	body := fmt.Sprintf("%s 已将交付 v%d 确认为验收通过。", customer.Email, delivery.Version)
+	if status == statusRejected {
+		title = "客户提出了验收异议"
+		body = fmt.Sprintf("%s 对交付 v%d 提出了 %d 条异议，请尽快回复并推动复核。", customer.Email, delivery.Version, len(req.Objections))
+	}
+	s.Notifier.PublishProjectEvent(ctx, notification.ProjectEvent{
+		Body:      body,
+		Link:      fmt.Sprintf("/deliveries/%s", delivery.ID),
+		ProjectID: delivery.ProjectID,
+		SendEmail: true,
+		Title:     title,
+		Type:      "acceptance.decision",
+	})
+}
+
+// notifyObjectionReply 把开发者回复通知给提出异议的客户。
+func (s *Service) notifyObjectionReply(ctx context.Context, objectionID uuid.UUID, content string) {
+	if s.Notifier == nil {
+		return
+	}
+	queries := database.Queries(ctx, s.Database)
+	objection, err := queries.GetObjection(ctx, objectionID)
+	if err != nil {
+		return
+	}
+	delivery, err := queries.GetDelivery(ctx, objection.DeliveryID)
+	if err != nil {
+		return
+	}
+	s.Notifier.PublishUserEvent(ctx, objection.RaisedByID, notification.ProjectEvent{
+		Body:      fmt.Sprintf("开发团队已回复你的异议：%s", content),
+		Link:      fmt.Sprintf("/deliveries/%s", delivery.ID),
+		ProjectID: delivery.ProjectID,
+		SendEmail: true,
+		Title:     "你的验收异议已收到回复",
+		Type:      "objection.replied",
 	})
 }
 
@@ -314,15 +367,8 @@ func (s *Service) EnsureVerifiedCustomer(ctx context.Context, deliveryID uuid.UU
 // RegisterVerifiedIdentity 登记客户在交付上的已验证身份。
 func (s *Service) RegisterVerifiedIdentity(ctx context.Context, deliveryID uuid.UUID, email, code string) error {
 	queries := database.Queries(ctx, s.Database)
-	record, err := queries.GetEmailVerificationCode(ctx, hashVerificationCode(code))
-	if err != nil {
-		return errs.BadRequest("验证码无效或已过期", nil)
-	}
-	if record.Attempts >= maxVerificationAttempts {
-		return errs.BadRequest("验证码尝试次数过多，请重新获取", nil)
-	}
-	if _, err := queries.ConsumeEmailVerificationCode(ctx, record.ID); err != nil {
-		return errs.BadRequest("验证码已被使用", nil)
+	if err := consumeVerificationCode(ctx, s.Database, queries, email, code); err != nil {
+		return err
 	}
 	normalized := strings.ToLower(strings.TrimSpace(email))
 	user, err := s.EnsureCustomer(ctx, deliveryProjectID(ctx, queries, deliveryID), normalized)

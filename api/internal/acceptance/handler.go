@@ -4,12 +4,14 @@ package acceptance
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"api/internal/evidence"
+	"api/internal/identity"
 	"api/internal/platform/access"
 	"api/internal/platform/audit"
 	"api/internal/platform/db"
@@ -31,9 +33,10 @@ const (
 
 // Handler 提供验收相关的 HTTP 接口。
 type Handler struct {
-	EvidenceService *evidence.Service        // 证据业务服务，用于客户门户展示证据
-	Identity        *CustomerIdentityService // 客户邮箱验证服务
-	Service         *Service                 // 验收业务服务
+	Cooldown        *identity.CooldownLimiter // 验证码发送冷却限流器
+	EvidenceService *evidence.Service         // 证据业务服务，用于客户门户展示证据
+	Identity        *CustomerIdentityService  // 客户邮箱验证服务
+	Service         *Service                  // 验收业务服务
 }
 
 // PortalRoutes 注册客户验收门户接口，通过分享链接令牌访问。
@@ -67,6 +70,10 @@ func (h *Handler) requestVerificationCode(w http.ResponseWriter, r *http.Request
 	var req RequestVerificationCodeRequest
 	if err := validate.Decode(r, &req); err != nil {
 		response.Fail(w, errs.BadRequest(err.Error(), err))
+		return
+	}
+	if h.Cooldown != nil && !h.Cooldown.Allow("acceptance-code|"+strings.ToLower(strings.TrimSpace(req.Email))) {
+		response.Fail(w, errs.TooManyRequests("验证码发送过于频繁，请稍后再试", nil))
 		return
 	}
 	if err := h.Identity.RequestVerificationCode(r.Context(), req.Email); err != nil {

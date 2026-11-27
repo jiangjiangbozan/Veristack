@@ -26,6 +26,7 @@ type Handler struct {
 // Routes 注册项目模块的路由，全部需要鉴权。
 func (h *Handler) Routes(r chi.Router) {
 	r.Post("/projects", h.create)
+	r.Post("/projects/import", h.importProject)
 	r.Get("/projects", h.list)
 	r.Route("/projects/{projectId}", func(r chi.Router) {
 		r.Get("/", h.get)
@@ -92,6 +93,30 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.OK(w, CreateProjectResponse{Project: views.FromProject(project)})
+}
+
+// importProject 从结构化 JSON 导入项目、首版基线与里程碑。
+func (h *Handler) importProject(w http.ResponseWriter, r *http.Request) {
+	principal, _, err := h.principal(r)
+	if err != nil {
+		response.Fail(w, err)
+		return
+	}
+	var req ImportProjectRequest
+	if err := validate.Decode(r, &req); err != nil {
+		response.Fail(w, errs.BadRequest(err.Error(), err))
+		return
+	}
+	result, err := h.Service.Import(r.Context(), principal.OrganizationID, principal.ID, req)
+	if err != nil {
+		response.Fail(w, err)
+		return
+	}
+	if err := h.recordAudit(r.Context(), r, principal, "project.import", result.Project.ID, nil, result); err != nil {
+		response.Fail(w, err)
+		return
+	}
+	response.OK(w, result)
 }
 
 // ensureProject 读取项目并校验其组织归属，失败时直接写入错误响应。

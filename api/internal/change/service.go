@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"api/internal/notification"
 	"api/internal/platform/database"
 	"api/internal/platform/db"
 	"api/internal/platform/dbutil"
@@ -25,7 +26,8 @@ const (
 
 // Service 提供变更申请相关的业务方法。
 type Service struct {
-	Database *pgxpool.Pool // 数据库连接池
+	Database *pgxpool.Pool          // 数据库连接池
+	Notifier notification.Publisher // 站内与邮件通知，可为空
 }
 
 // Create 基于项目最新基线创建变更申请，并保存拟议的需求快照。
@@ -92,6 +94,7 @@ func (s *Service) Decide(ctx context.Context, changeID, decidedBy uuid.UUID, req
 		return db.ChangeRequest{}, nil, fmt.Errorf("记录变更决定失败: %w", err)
 	}
 	if req.Decision != decisionApprove {
+		s.notifyDecision(ctx, decided, status)
 		return decided, nil, nil
 	}
 	proposed := parseRequirements(changeRequest.RequirementsJson)
@@ -99,6 +102,7 @@ func (s *Service) Decide(ctx context.Context, changeID, decidedBy uuid.UUID, req
 	if err != nil {
 		return db.ChangeRequest{}, nil, err
 	}
+	s.notifyDecision(ctx, decided, status)
 	return decided, baseline, nil
 }
 
@@ -117,6 +121,27 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, limit, offset i
 		Limit:     limit,
 		Offset:    offset,
 		ProjectID: projectID,
+	})
+}
+
+// notifyDecision 把变更审批结果通知给申请人，通知失败不影响审批结果。
+func (s *Service) notifyDecision(ctx context.Context, changeRequest db.ChangeRequest, status string) {
+	if s.Notifier == nil {
+		return
+	}
+	title := "变更申请已批准"
+	body := "你提交的变更申请已被批准，项目需求基线已生成新版本。"
+	if status == statusRejected {
+		title = "变更申请未通过"
+		body = "你提交的变更申请未通过审批，请查看项目变更记录了解详情。"
+	}
+	s.Notifier.PublishUserEvent(ctx, changeRequest.RequesterID, notification.ProjectEvent{
+		Body:      body,
+		Link:      fmt.Sprintf("/projects/%s", changeRequest.ProjectID),
+		ProjectID: changeRequest.ProjectID,
+		SendEmail: true,
+		Title:     title,
+		Type:      "change.decided",
 	})
 }
 
@@ -155,43 +180,62 @@ func createBaselineFromSnapshot(ctx context.Context, pool *pgxpool.Pool, project
 }
 
 // applyChanges 把需求变更应用到现有需求集合，生成拟议快照。
+//
+// modify 必须原位替换而不是追加，否则同一需求会在快照里出现两次；
+// remove 后要重建索引，避免后续变更命中已失效的下标。
 func applyChanges(current []views.RequirementView, changes []RequirementChange) []views.RequirementView {
-	result := make([]views.RequirementView, 0, len(current)+len(changes))
-	byCode := make(map[string]views.RequirementView, len(current))
-	for _, item := range current {
-		byCode[item.Code] = item
-	}
-	for _, item := range current {
-		removed := false
-		for _, change := range changes {
-			if change.Operation == "remove" && change.Code == item.Code {
-				removed = true
-				break
-			}
-		}
-		if !removed {
-			result = append(result, item)
-		}
+	result := append([]views.RequirementView(nil), current...)
+	indexByCode := make(map[string]int, len(result))
+	for index, item := range result {
+		indexByCode[item.Code] = index
 	}
 	for _, change := range changes {
-		if change.Operation == "remove" {
-			continue
+		switch change.Operation {
+		case "remove":
+			index, found := indexByCode[change.Code]
+			if !found {
+				continue
+			}
+			result = append(result[:index], result[index+1:]...)
+			indexByCode = rebuildCodeIndex(result)
+		case "modify":
+			item := requirementFromChange(change)
+			if index, found := indexByCode[change.Code]; found {
+				item.ID = result[index].ID
+				result[index] = item
+				continue
+			}
+			result = append(result, item)
+			indexByCode[change.Code] = len(result) - 1
+		default:
+			item := requirementFromChange(change)
+			result = append(result, item)
+			indexByCode[change.Code] = len(result) - 1
 		}
-		item := views.RequirementView{
-			AcceptanceCriteria: change.AcceptanceCriteria,
-			Code:               change.Code,
-			Description:        change.Description,
-			ID:                 uuid.New(),
-			Priority:           change.Priority,
-			Status:             "pending",
-			Title:              change.Title,
-		}
-		if existing, ok := byCode[change.Code]; ok {
-			item.ID = existing.ID
-		}
-		result = append(result, item)
 	}
 	return result
+}
+
+// requirementFromChange 把变更输入转换为拟议需求条目。
+func requirementFromChange(change RequirementChange) views.RequirementView {
+	return views.RequirementView{
+		AcceptanceCriteria: change.AcceptanceCriteria,
+		Code:               change.Code,
+		Description:        change.Description,
+		ID:                 uuid.New(),
+		Priority:           change.Priority,
+		Status:             "pending",
+		Title:              change.Title,
+	}
+}
+
+// rebuildCodeIndex 在删除后重建需求编号到下标的关系。
+func rebuildCodeIndex(requirements []views.RequirementView) map[string]int {
+	indexByCode := make(map[string]int, len(requirements))
+	for index, item := range requirements {
+		indexByCode[item.Code] = index
+	}
+	return indexByCode
 }
 
 // parseRequirements 从 JSONB 解析需求视图列表。

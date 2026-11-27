@@ -25,12 +25,16 @@ import (
 	"api/internal/identity"
 	"api/internal/integration"
 	"api/internal/milestone"
+	"api/internal/notification"
 	"api/internal/platform/ai"
 	"api/internal/platform/auth"
 	"api/internal/platform/config"
 	"api/internal/platform/database"
+	"api/internal/platform/errs"
 	"api/internal/platform/logger"
+	"api/internal/platform/mailer"
 	appMiddleware "api/internal/platform/middleware"
+	"api/internal/platform/outbox"
 	"api/internal/platform/response"
 	"api/internal/platform/storage"
 	"api/internal/project"
@@ -38,9 +42,11 @@ import (
 )
 
 const (
-	gracefulTimeout = 10 * time.Second
-	healthPath      = "/healthz"
-	apiPrefix       = "/api/v1"
+	gracefulTimeout  = 10 * time.Second
+	healthPath       = "/healthz"
+	readinessPath    = "/readyz"
+	readinessTimeout = 2 * time.Second
+	apiPrefix        = "/api/v1"
 )
 
 // AppState 聚合服务运行所需的共享依赖，供各 Handler 注入使用。
@@ -83,6 +89,11 @@ func main() {
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	defer stopWorker()
 	go (&integration.Worker{Database: pool, Logger: log}).Run(workerCtx)
+	go (&outbox.EmailWorker{
+		Database: pool,
+		Logger:   log,
+		Mailer:   buildAccountMailer(cfg),
+	}).Run(workerCtx)
 	server := newHTTPServer(cfg, state)
 	go listen(server, log)
 	waitForShutdown(server, log)
@@ -120,6 +131,23 @@ func healthCheck(w http.ResponseWriter, _ *http.Request) {
 	response.OK(w, map[string]string{"status": "ok"})
 }
 
+// readinessCheck 检查数据库连通性，供容器编排判断服务是否可以接收流量。
+//
+// 存活检查只说明进程还在；把数据库不可用的实例标记为就绪会让请求以 500 失败，
+// 因此就绪检查必须实际 Ping 一次数据库，并在失败时返回 503。
+func readinessCheck(pool *pgxpool.Pool, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), readinessTimeout)
+		defer cancel()
+		if err := pool.Ping(ctx); err != nil {
+			log.Error("就绪检查失败", "error", err)
+			response.Fail(w, errs.Unavailable("数据库暂不可用", err))
+			return
+		}
+		response.OK(w, map[string]string{"status": "ready"})
+	}
+}
+
 // listen 启动监听，非正常退出时记录错误并结束进程。
 func listen(server *http.Server, log *slog.Logger) {
 	log.Info("服务启动", "addr", server.Addr)
@@ -139,13 +167,36 @@ func newHTTPServer(cfg *config.Config, state *AppState) *http.Server {
 	// 写请求统一开启请求级事务，业务写入与审计写入落在同一事务里。
 	router.Use(database.Middleware(state.DB))
 	router.Get(healthPath, healthCheck)
+	router.Get(readinessPath, readinessCheck(state.DB, state.Logger))
 	router.Route(apiPrefix, func(r chi.Router) {
-		publicIdentity := identity.Handler{Service: &identity.Service{Auth: state.Auth, Database: state.DB}}
+		emailQueue := outbox.NewEmailWriter(state.DB)
+		notifier := &notification.Service{
+			Database:      state.DB,
+			EmailQueue:    emailQueue,
+			Logger:        state.Logger,
+			Mailer:        buildAccountMailer(cfg),
+			PublicBaseURL: cfg.Server.PublicBaseURL,
+		}
+		accountCooldown := identity.NewCooldownLimiter(time.Minute)
+		publicIdentity := identity.Handler{
+			Cooldown: accountCooldown,
+			Limiter:  identity.NewLoginLimiter(),
+			Service: &identity.Service{
+				Auth:          state.Auth,
+				Database:      state.DB,
+				EmailQueue:    emailQueue,
+				Mailer:        buildAccountMailer(cfg),
+				PublicBaseURL: cfg.Server.PublicBaseURL,
+				Repository:    identity.NewRepository(state.DB),
+				Users:         identity.NewUserStore(state.DB),
+			},
+		}
 		publicIdentity.Routes(r)
 		acceptanceHandler := &acceptance.Handler{
+			Cooldown:        accountCooldown,
 			EvidenceService: &evidence.Service{Database: state.DB, Storage: state.Storage},
-			Identity:        &acceptance.CustomerIdentityService{Database: state.DB, Mailer: buildMailer(cfg)},
-			Service:         &acceptance.Service{Database: state.DB},
+			Identity:        &acceptance.CustomerIdentityService{Database: state.DB, EmailQueue: emailQueue, Mailer: buildMailer(cfg)},
+			Service:         &acceptance.Service{Database: state.DB, Notifier: notifier},
 		}
 		acceptanceHandler.PortalRoutes(r)
 		integrationHandler := integration.Handler{Service: &integration.Service{
@@ -155,8 +206,8 @@ func newHTTPServer(cfg *config.Config, state *AppState) *http.Server {
 		}}
 		integrationHandler.PublicRoutes(r)
 		r.Group(func(protected chi.Router) {
-			protected.Use(appMiddleware.Authenticate(state.Auth))
-			registerRoutes(protected, state)
+			protected.Use(appMiddleware.Authenticate(state.Auth, state.DB))
+			registerRoutes(protected, state, notifier)
 			publicIdentity.MeRoutes(protected)
 		})
 	})
@@ -183,13 +234,13 @@ func prepareDatabase(ctx context.Context, cfg *config.Config, log *slog.Logger) 
 }
 
 // registerRoutes 注册阶段一的业务路由，所有模块共享同一数据库连接池。
-func registerRoutes(r chi.Router, state *AppState) {
+func registerRoutes(r chi.Router, state *AppState, notifier *notification.Service) {
 	packRoot := filepath.Join(state.Config.Storage.LocalRoot, "packs")
 	projectHandler := project.Handler{Service: &project.Service{Database: state.DB}}
 	projectHandler.Routes(r)
 	scopeHandler := scope.Handler{Service: &scope.Service{Database: state.DB}}
 	scopeHandler.Routes(r)
-	changeHandler := change.Handler{Service: &change.Service{Database: state.DB}}
+	changeHandler := change.Handler{Service: &change.Service{Database: state.DB, Notifier: notifier}}
 	changeHandler.Routes(r)
 	milestoneHandler := milestone.Handler{Service: &milestone.Service{Database: state.DB}}
 	milestoneHandler.Routes(r)
@@ -206,9 +257,11 @@ func registerRoutes(r chi.Router, state *AppState) {
 	evidenceHandler.Routes(r)
 	acceptanceHandler := acceptance.Handler{
 		EvidenceService: &evidence.Service{Database: state.DB, Storage: state.Storage},
-		Service:         &acceptance.Service{Database: state.DB},
+		Service:         &acceptance.Service{Database: state.DB, Notifier: notifier},
 	}
 	acceptanceHandler.Routes(r)
+	notificationHandler := notification.Handler{Service: notifier}
+	notificationHandler.Routes(r)
 	integrationHandler := integration.Handler{Service: &integration.Service{
 		AI:       state.Model,
 		Database: state.DB,
@@ -237,4 +290,12 @@ func buildMailer(cfg *config.Config) acceptance.Mailer {
 		return acceptance.LogMailer{}
 	}
 	return acceptance.NewSMTPMailer(cfg.SMTP)
+}
+
+// buildAccountMailer 为账户与通知模块选择邮件发送方式。
+func buildAccountMailer(cfg *config.Config) mailer.Mailer {
+	if cfg.SMTP.Host == "" {
+		return mailer.LogMailer{}
+	}
+	return mailer.NewSMTPMailer(cfg.SMTP)
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"api/internal/platform/datetime"
 	"api/internal/platform/db"
 	"api/internal/platform/errs"
+	"api/internal/platform/outbox"
 )
 
 const (
@@ -29,8 +31,9 @@ const (
 
 // CustomerIdentityService 负责客户邮箱验证与验收身份登记。
 type CustomerIdentityService struct {
-	Database *pgxpool.Pool // 数据库连接池
-	Mailer   Mailer        // 邮件发送器
+	Database   *pgxpool.Pool     // 数据库连接池
+	EmailQueue outbox.EmailQueue // 邮件任务队列，未配置时回退为同步发送
+	Mailer     Mailer            // 邮件发送器
 }
 
 // Mailer 抽象邮件发送能力，便于在未配置 SMTP 时以日志替代。
@@ -53,13 +56,20 @@ func (s *CustomerIdentityService) RequestVerificationCode(ctx context.Context, e
 	if err != nil {
 		return errs.Internal(err)
 	}
-	_, err = database.Queries(ctx, s.Database).CreateEmailVerificationCode(ctx, db.CreateEmailVerificationCodeParams{
+	record, err := database.Queries(ctx, s.Database).CreateEmailVerificationCode(ctx, db.CreateEmailVerificationCodeParams{
 		CodeHash:  hashVerificationCode(code),
 		Email:     strings.ToLower(strings.TrimSpace(email)),
 		ExpiresAt: datetime.Now().Add(verificationCodeTTL),
 	})
 	if err != nil {
 		return errs.Internal(err)
+	}
+	if s.EmailQueue != nil {
+		return s.EmailQueue.EnqueueEmail(ctx, outbox.EmailPayload{
+			Body:    fmt.Sprintf("您的验收验证码是 %s，15 分钟内有效。", code),
+			Subject: "Veristack 验收验证码",
+			To:      strings.ToLower(strings.TrimSpace(email)),
+		}, "acceptance-code:"+record.ID.String())
 	}
 	if err := s.Mailer.SendVerificationCode(ctx, email, code); err != nil {
 		return errs.Internal(err)
@@ -70,21 +80,41 @@ func (s *CustomerIdentityService) RequestVerificationCode(ctx context.Context, e
 // VerifyCode 核验客户提交的验证码，并标记邮箱已验证。
 func (s *CustomerIdentityService) VerifyCode(ctx context.Context, email, code string) error {
 	queries := database.Queries(ctx, s.Database)
-	record, err := queries.GetEmailVerificationCode(ctx, hashVerificationCode(code))
-	if err != nil {
-		return errs.BadRequest("验证码无效或已过期", nil)
-	}
-	if record.Attempts >= maxVerificationAttempts {
-		return errs.BadRequest("验证码尝试次数过多，请重新获取", nil)
-	}
-	if _, err := queries.ConsumeEmailVerificationCode(ctx, record.ID); err != nil {
-		return errs.BadRequest("验证码已被使用", nil)
+	if err := consumeVerificationCode(ctx, s.Database, queries, email, code); err != nil {
+		return err
 	}
 	user, err := queries.GetUserByEmail(ctx, strings.ToLower(strings.TrimSpace(email)))
 	if err == nil {
 		if _, err := queries.MarkUserEmailVerified(ctx, user.ID); err != nil {
 			return errs.Internal(err)
 		}
+	}
+	return nil
+}
+
+// consumeVerificationCode 按邮箱读取最新验证码，校验摘要并累计错误尝试次数。
+//
+// 不能只按验证码摘要查询：错误验证码查不到记录，attempts 永远不会增长，
+// 达到上限的判断也就永远不会生效。
+func consumeVerificationCode(ctx context.Context, pool *pgxpool.Pool, queries *db.Queries, email, code string) error {
+	record, err := queries.GetLatestEmailVerificationCodeByEmail(ctx, strings.ToLower(strings.TrimSpace(email)))
+	if err != nil {
+		return errs.BadRequest("验证码无效或已过期", nil)
+	}
+	if record.Attempts >= maxVerificationAttempts {
+		return errs.BadRequest("验证码尝试次数过多，请重新获取", nil)
+	}
+	expected := hashVerificationCode(code)
+	if subtle.ConstantTimeCompare([]byte(record.CodeHash), []byte(expected)) != 1 {
+		// 错误尝试会让 Handler 返回 400，请求级事务随之回滚；
+		// 这里用连接池单独写入计数，确保失败次数不会因为事务回滚被抹掉。
+		if err := db.New(pool).IncrementEmailVerificationAttempts(ctx, record.ID); err != nil {
+			return errs.Internal(err)
+		}
+		return errs.BadRequest("验证码无效或已过期", nil)
+	}
+	if _, err := queries.ConsumeEmailVerificationCode(ctx, record.ID); err != nil {
+		return errs.BadRequest("验证码已被使用", nil)
 	}
 	return nil
 }
