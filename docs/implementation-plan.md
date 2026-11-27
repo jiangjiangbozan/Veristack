@@ -21,15 +21,15 @@ Veristack 是一个**独立于 Git、CI、测试框架和 Agent 平台的软件�
 
 | 目录 | 现状 | 缺口 |
 | --- | --- | --- |
-| `web/` | React 19.3 + TypeScript 6 + Vite 8 + Tailwind 4，TanStack Query/Router/Table，9 个业务功能模块，明暗双主题 | 缺 7 个功能入口：项目编辑、成员管理、AI 交付摘要、AI 变更影响、基线对比、CI 报告列表、证据附件下载 |
-| `api/` | Go 1.27.2 + Chi，10 个业务模块，约 60 个接口，19 张表，96 条 sqlc 查询，Goose 迁移 | 缺审计查询接口、Pack 下载接口、通知模块；0 个测试文件；无 CI 工作流 |
+| `web/` | React 19.3 + TypeScript 6 + Vite 8 + Tailwind 4，TanStack Query/Router/Table，9 个业务功能模块，明暗双主题 | 7 个功能入口已补齐并通过构建 |
+| `api/` | Go 1.27.2 + Chi，11 个业务模块，69 个接口操作，25 张表，96 条 sqlc 查询，10 个 Goose 迁移 | 账户体系、通知模块与项目导入已落地并通过测试；CI 工作流已接入 |
 | `openspec/` | 已初始化 `config.yaml`，`changes/` 与 `specs/` 为空 | 尚未沉淀任何规格 |
 | `docs/` | `chatGPT-chat-history.md`、`implementation-plan.md`、`todo.md`（商业化审查）、`next-steps.md`（可执行待办） | 后续按需补充架构与接口文档 |
 | `web/agents.md` | 已按 React + TypeScript + Vite 重写，并补充 UI/UX 视觉约定 | 无 |
 | `api/agents.md` | 已按 Go + Chi + PostgreSQL 重写 | 无 |
 | 根目录 `agents.md` | 已改为语言无关的通用原则 + 产品领域约定（34 条） | 无 |
 
-当前成熟度为 **Alpha**：核心业务链路已跑通，但存在 7 项 P0 级可信性缺陷与 0 个自动化测试，尚不能正式商用。完整待办与执行顺序见 [`next-steps.md`](next-steps.md)。
+当前成熟度为 **Alpha 收尾**：核心业务链路、账户体系、通知与第一批可信性修复均已落地，已有多个后端单元测试文件；仍缺 CI 工作流、集成测试与 OpenAPI 全量双向核对，尚不能正式商用。完整待办与执行顺序见 [`next-steps.md`](next-steps.md)。
 
 ## 3. 关键决策
 
@@ -304,11 +304,11 @@ web/src/
 
 ### 阶段 4：开放生态（已完成）
 
-- Evidence Pack 格式契约（`api/contracts/evidence-pack/v1.md`）：可脱离服务端独立核验的交付证据快照，独立版本化。
+- Evidence Pack 格式契约（`api/contracts/evidence-pack/v2.md`）：可脱离服务端独立核验的交付证据快照，独立版本化。
 - Evidence Pack 导出：`POST /deliveries/{id}/pack` 打包交付清单与证据附件，生成 SHA-256 摘要并按配置附带 Ed25519 签名。
 - 独立核验 CLI（`api/cmd/veristack`）：`veristack verify` 校验清单摘要、附件摘要与签名，异常时返回非零退出码，便于接入流水线卡口；`veristack keygen` 生成签名密钥对。
 - 第三方平台扩展：Webhook 支持 GitHub、GitLab 与 Gitee，Gitee 使用 `X-Gitee-Token` 校验。
-- OpenAPI 3.1 完整契约（`api/contracts/openapi/openapi.yaml`）：覆盖 39 个接口、17 个数据模型与 10 个资源分组。
+- OpenAPI 3.1 完整契约（`api/contracts/openapi/openapi.yaml`）：覆盖 57 条路径、69 个操作、核心数据模型与 11 个资源分组。
 - 私有化部署文档（`deploy/docs/deployment.md`）：环境要求、环境变量、HTTPS、第三方接入、备份恢复与常见问题。
 
 ## 10. 验收口径

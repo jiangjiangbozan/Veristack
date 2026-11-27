@@ -1,187 +1,214 @@
-# Veristack · 验迹
+<p align="center">
+  <img src="./docs/readme-hero.svg" alt="Veristack · 验迹：让每一次软件交付，都有可以独立核验的依据" width="100%" />
+</p>
 
-> **让每一次软件交付，都有可以独立核验的依据。**
+<h1 align="center">Veristack · 验迹</h1>
 
-Veristack 是一个独立于 Git、CI、测试框架和 Agent 平台的**软件交付证据层**。它消费这些工具产生的证据，把客户需求、开发过程、代码变更、测试结果和客户验收，整理成一份双方都能独立核验的交付记录。
+<p align="center">
+  <strong>独立于 Git、CI 和 Agent 平台的软件交付证据层。</strong><br />
+  把需求基线、变更确认、交付清单、证据和客户验收，串成一条双方都能独立核验的记录链。
+</p>
 
-| 需求有依据 | 变更有确认 | 交付有凭据 | 验收可追溯 |
-| --- | --- | --- | --- |
-| 原始需求与验收条件 | 每次调整都留下客户决定 | 代码版本与开发记录 | 客户确认与异议记录 |
-| 冻结的范围基线不可被改写 | 批准后生成新的基线版本 | 清单生成 SHA-256 摘要 | 争议可以逐条回溯 |
+<p align="center">
+  <a href="https://github.com/jiangjiangbozan/Veristack/actions/workflows/ci.yml">
+    <img alt="CI" src="https://github.com/jiangjiangbozan/Veristack/actions/workflows/ci.yml/badge.svg?branch=main" />
+  </a>
+  <a href="LICENSE">
+    <img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" />
+  </a>
+  <a href="https://github.com/jiangjiangbozan/Veristack/blob/main/api/go.mod">
+    <img alt="Go 1.27.2" src="https://img.shields.io/badge/Go-1.27.2-00ADD8?logo=go&amp;logoColor=white" />
+  </a>
+  <a href="https://github.com/jiangjiangbozan/Veristack/blob/main/web/package.json">
+    <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&amp;logoColor=white" />
+  </a>
+  <a href="https://github.com/jiangjiangbozan/Veristack">
+    <img alt="Status: Alpha" src="https://img.shields.io/badge/status-alpha-E8A33D" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#核心能力">核心能力</a> ·
+  <a href="#架构">架构</a> ·
+  <a href="#evidence-pack可离线核验的交付证据">Evidence Pack</a> ·
+  <a href="#贡献">贡献</a>
+</p>
+
+> **Status: Alpha.** 核心交付闭环、Evidence Pack v2 和客户验收已完成实现并通过本地集成验证；接口、数据模型与部署方式仍在收敛。生产使用前请先阅读 [部署指南](deploy/docs/deployment.md) 并完成备份与升级演练。
+
+## 为什么是验迹
+
+Git 记录代码，CI 记录测试，聊天工具记录沟通，但它们都不负责回答一个问题：
+
+> **这次交付到底答应了什么，客户又是基于什么确认的？**
+
+Veristack 不替代这些工具。它消费它们产生的证据，把“约定 → 变更 → 交付 → 验收”固定成一条只追加的记录链。
+
+| 交付现场的问题 | 只靠 Git / CI / 聊天记录 | Veristack |
+| --- | --- | --- |
+| 当初承诺了什么？ | 散落在需求文档和聊天里 | 冻结的需求基线与验收条件 |
+| 中途改过什么？ | 提交记录里看不出来 | 变更申请、客户确认与新基线版本 |
+| 这次交付包含什么？ | 一个压缩包和一句“已完成” | 不可覆盖的交付清单与 SHA-256 摘要 |
+| 客户怎么确认的？ | 聊天截图，难以归因 | 客户验收门户，逐条确认并保留异议闭环 |
+| 事后怎么证明？ | 只能继续信任服务端 | Evidence Pack v2 + Ed25519，可离线核验 |
 
 **核心对象是一次软件交付，而不是一个 Agent Session。** 一个交付版本对应一个不可随意覆盖的证据快照。
 
----
+## 工作原理
 
-## 目录
-
-- [它解决什么问题](#它解决什么问题)
-- [核心能力](#核心能力)
-- [技术栈](#技术栈)
-- [快速开始](#快速开始)
-- [项目结构](#项目结构)
-- [Evidence Pack：可离线核验的交付证据](#evidence-pack可离线核验的交付证据)
-- [第三方平台接入](#第三方平台接入)
-- [AI 的边界](#ai-的边界)
-- [常用命令](#常用命令)
-- [文档](#文档)
-- [路线图](#路线图)
-- [许可证](#许可证)
-
----
-
-## 它解决什么问题
-
-软件外包与定制开发中，最常见的纠纷不是「代码写没写」，而是**「当初约定的是什么」**：
-
-- 客户说「我以为包含导出功能」，开发者说「需求单里没写」。
-- 需求改过好几轮，没有人说得清最终范围。
-- 交付完了，客户说「这个没达到要求」，开发者说「已经做过了」。
-- 最后双方只能凭记忆和截图争论。
-
-Veristack 把这件事变成一条**可核验的记录链**：
-
-```
-需求基线 v1 ──冻结──▶ 变更申请 ──客户确认──▶ 需求基线 v2
-                                                      │
-                                    交付版本（清单冻结 + SHA-256）
-                                                      │
-                              证据（提交、CI 报告、截图、测试报告）
-                                                      │
-                              客户逐条验收 ──▶ 确认 / 异议与回复闭环
+```mermaid
+flowchart LR
+  A["需求与验收条件"] --> B["冻结基线 v1"]
+  B --> C["变更申请"]
+  C -->|"客户确认"| D["新基线 v2"]
+  D --> E["交付清单<br/>SHA-256 快照"]
+  E --> F["证据时间线<br/>提交 / CI / 截图"]
+  F --> G["客户验收<br/>逐条确认 / 异议闭环"]
+  G --> H["Evidence Pack v2<br/>Ed25519 签名"]
+  H --> I["veristack verify<br/>离线核验"]
 ```
 
-每一步都留下时间、操作人和内容摘要，双方都可以独立复现当时发生了什么。
+每一步都记录时间、操作人和内容摘要。冻结后的基线与交付清单只读；后续补充证据只能关联追加，不能改写历史。
 
 ## 核心能力
 
-### 1. 需求范围基线与变更确认
+| 能力 | 说明 |
+| --- | --- |
+| **需求基线与变更确认** | 需求条目带验收条件，基线冻结后不可编辑；调整必须走变更申请，客户确认后生成新版本，旧版本原样保留。 |
+| **不可覆盖的交付清单** | 创建交付时冻结当前基线为清单快照并生成 SHA-256 摘要；补充证据只追加，不改写历史清单。 |
+| **证据时间线** | Git 提交、CI 报告、截图、录屏、测试报告、文档与人工说明统一归档，按时间倒序形成证据链。 |
+| **客户验收门户** | 客户通过签名分享链接进入，无需注册；逐条给出「符合 / 不符合」，可提出异议，开发者回复后客户复核。 |
+| **Evidence Pack 离线核验** | 导出交付快照与附件，附带 Ed25519 签名；客户用 `veristack verify` 在本地核验，无需信任服务端。 |
+| **自动化与 AI 建议** | GitHub / GitLab / Gitee Webhook、提交按 `REQ-xxx` 关联需求、JUnit XML 报告导入；AI 产出全部为待确认草稿。 |
 
-需求条目带验收条件，基线一经冻结即不可编辑。任何调整都必须通过变更申请，由客户确认后生成新的基线版本，旧版本原样保留，随时可对比差异。
-
-### 2. 交付版本与不可覆盖的清单
-
-创建交付时自动把当前基线的需求与验收条件冻结为清单快照，并生成 SHA-256 摘要。交付之后补充证据只会以关联方式追加，不会改写历史清单。
-
-### 3. 证据时间线
-
-Git 提交、CI 报告、截图、录屏、测试报告、文档与人工说明统一归档，按时间倒序形成证据链。附件落盘即计算内容摘要。
-
-### 4. 客户验收门户
-
-客户通过签名分享链接进入（无需注册），逐条对验收条件给出「符合 / 不符合」并填写说明，可对任一条提出异议。开发者回复后客户复核，形成闭环。
-
-### 5. Evidence Pack 离线核验
-
-导出交付快照与证据附件为 Evidence Pack，配置签名私钥时附带 Ed25519 签名。客户用 `veristack verify` 即可在本地核验内容是否被篡改，**无需信任服务端**。
-
-### 6. 自动化接入
-
-- **Webhook**：GitHub、GitLab、Gitee 事件按项目维度接入，先落库再异步处理
-- **提交自动归档**：按提交信息中的 `REQ-xxx` 编号关联到需求，生成证据
-- **CI 报告导入**：解析标准 JUnit XML，汇总通过、失败、跳过与耗时
-- **AI 建议**：需求提取、变更影响分析、交付摘要，全部为待确认草稿
-
-## 技术栈
-
-| 层 | 选型 | 说明 |
-| --- | --- | --- |
-| 后端 | Go 1.27 + Chi | 模块化单体，路由与中间件链清晰 |
-| 数据访问 | PostgreSQL + pgx + sqlc | 从 SQL 生成类型安全代码，Goose 管理迁移 |
-| 存储 | S3 兼容接口（一期为本地文件系统） | 证据附件与交付快照 |
-| 前端 | React 19 + TypeScript + Vite | TanStack Query / Router / Table |
-| 样式 | Tailwind CSS 4 + shadcn/ui | 语义化 CSS 变量驱动的明暗双主题 |
-| 完整性 | SHA-256 + Ed25519 | 内容摘要与交付清单签名 |
-| 契约 | OpenAPI 3.1 | 39 个接口的完整描述 |
+> Veristack 不是又一个 Jira，也不替代 Git、CI 或测试平台。它只负责把这些系统里的证据固定下来，并让客户可以独立核验。
 
 ## 快速开始
 
-### 前置条件
+### 一键启动（推荐）
 
-- Go 1.27+
-- Node.js 20+
-- PostgreSQL 17（或使用 Docker Compose 一键启动）
-
-### 使用 Docker Compose（推荐）
+需要 **Docker 24+** 与 **Docker Compose v2**。
 
 ```bash
+git clone https://github.com/jiangjiangbozan/Veristack.git
+cd Veristack
 cp .env.example .env
-# 修改 .env 中的 VERISTACK_AUTH_SECRET 与数据库密码
+
+# 必须修改 VERISTACK_AUTH_SECRET：至少 32 位，且不能使用 change-me-in-production
+# 同时建议修改 POSTGRES_PASSWORD
+# 生成随机密钥：openssl rand -base64 48
 
 docker compose -f deploy/compose/docker-compose.yml up -d --build
 ```
 
-访问 <http://localhost:5173>，数据库迁移会在 API 启动时自动执行。
+首次启动时 API 会自动执行 Goose 数据库迁移。启动完成后：
+
+| 服务 | 地址 |
+| --- | --- |
+| Web 控制台 | <http://localhost:5173> |
+| API | <http://localhost:8080> |
+| 存活检查 | <http://localhost:8080/healthz> |
+| 就绪检查（含数据库） | <http://localhost:8080/readyz> |
+
+查看启动日志：
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml logs -f api
+```
 
 ### 本地开发
 
+需要 **Go 1.27.2+**、**Node.js 22+**、**PostgreSQL 17**。
+
 ```bash
-# 后端
+# 只启动 PostgreSQL
+docker compose -f deploy/compose/docker-compose.yml up -d postgres
+
+# 终端 1：API
 cd api
 export VERISTACK_DATABASE_DSN='postgres://veristack:veristack@localhost:5432/veristack?sslmode=disable'
-export VERISTACK_AUTH_SECRET='change-me-in-production'
+export VERISTACK_AUTH_SECRET='<至少 32 位随机值>'
 go run ./cmd/server
 
-# 前端（另开终端）
+# 终端 2：Web
 cd web
-npm install
+npm ci
 npm run dev
 ```
 
 前端开发服务器会把 `/api` 请求代理到 `http://127.0.0.1:8080`。
 
+<details>
+<summary>Windows PowerShell</summary>
+
+```powershell
+Copy-Item .env.example .env
+
+cd api
+$env:VERISTACK_DATABASE_DSN = 'postgres://veristack:veristack@localhost:5432/veristack?sslmode=disable'
+$env:VERISTACK_AUTH_SECRET = '<至少 32 位随机值>'
+go run ./cmd/server
+
+# 另开终端
+cd web
+npm ci
+npm run dev
+```
+
+</details>
+
 ### 首次使用
 
-1. 打开控制台，选择「注册组织」创建工作室与 owner 账号
-2. 新建项目，录入需求并冻结为基线 v1
-3. 需要调整范围时发起变更申请，由客户确认后生成 v2
-4. 从基线创建交付版本，补充证据后生成客户验收链接
+1. 打开控制台，选择「注册组织」创建工作室与 owner 账号。
+2. 新建项目，录入需求并冻结为基线 v1。
+3. 需要调整范围时发起变更申请，由客户确认后生成 v2。
+4. 从基线创建交付版本，补充证据后生成客户验收链接。
 
-## 项目结构
+## 架构
+
+| 层 | 选型 | 职责 |
+| --- | --- | --- |
+| 后端 | Go 1.27 + Chi | 模块化单体；Handler / Service / Repository 分层 |
+| 数据访问 | PostgreSQL 17 + pgx + sqlc + Goose | 类型安全查询、版本化迁移、租户隔离 |
+| 存储 | 本地文件系统 | 证据附件与 Evidence Pack；S3 驱动在路线图中 |
+| 前端 | React 19 + TypeScript + Vite | TanStack Router / Query / Table，明暗双主题 |
+| 样式 | Tailwind CSS 4 + 语义化 CSS 变量 | 组件内不写死色值，统一主题 token |
+| 完整性 | SHA-256 + Ed25519 | 清单摘要、交付快照签名、离线核验 |
+| 契约 | OpenAPI 3.1 | 57 条路径、69 个操作，逐字段契约测试已接入 CI |
+
+```mermaid
+flowchart TB
+  Web["Web 控制台<br/>React 19"] --> API["HTTP API<br/>Go + Chi"]
+  CLI["veristack CLI<br/>离线核验"] --> Pack["Evidence Pack v2<br/>清单 + 附件 + 签名"]
+  API --> PG[("PostgreSQL 17")]
+  API --> Store["证据存储<br/>本地文件系统"]
+  API --> Worker["Outbox Worker"]
+  Worker --> SCM["GitHub / GitLab / Gitee"]
+  Pack --> Store
+```
+
+## 仓库结构
 
 ```text
 veristack/
-├── api/                          # Go 后端
-│   ├── cmd/
-│   │   ├── server/               # API 服务入口
-│   │   └── veristack/            # Evidence Pack 核验 CLI
-│   ├── contracts/
-│   │   ├── openapi/              # OpenAPI 3.1 契约
-│   │   └── evidence-pack/        # Evidence Pack 格式契约
-│   ├── internal/
-│   │   ├── acceptance/           # 客户验收与异议闭环
-│   │   ├── change/               # 变更申请
-│   │   ├── delivery/             # 交付版本与清单
-│   │   ├── evidence/             # 证据归档
-│   │   ├── identity/             # 注册与登录
-│   │   ├── integration/          # Webhook、CI 报告、AI 建议
-│   │   ├── milestone/            # 里程碑
-│   │   ├── platform/             # 数据库、配置、认证、存储、模型等基础设施
-│   │   ├── project/              # 项目与成员
-│   │   └── scope/                # 需求范围基线
-│   ├── migrations/               # Goose 迁移脚本
-│   └── sql/queries/              # sqlc 查询源
-├── web/                          # React 前端
-│   └── src/
-│       ├── app/                  # 入口、路由与全局状态
-│       ├── components/ui/        # 通用组件
-│       ├── features/             # 按业务模块组织
-│       ├── layouts/              # 布局
-│       ├── services/             # API 请求封装
-│       └── shared/               # 类型与工具
-├── deploy/
-│   ├── compose/                  # Docker Compose 编排
-│   ├── docker/                   # 镜像构建
-│   └── docs/                     # 部署文档
-├── docs/                         # 产品与实现规划
-└── agents.md                     # 项目开发约定
+├── api/                  # Go API、Evidence Pack CLI、迁移与 OpenAPI 契约
+├── web/                  # React 控制台
+├── deploy/               # Docker Compose、镜像与部署文档
+├── docs/                 # 数据库、测试规范、路线图与 README 资产
+├── AGENTS.md             # 全仓库开发约定
+├── CONTRIBUTING.md       # 贡献流程
+├── SECURITY.md           # 安全问题报告渠道
+└── README.md
 ```
+
+后端与前端的分层约定分别见 [`api/agents.md`](api/agents.md) 和 [`web/agents.md`](web/agents.md)。
 
 ## Evidence Pack：可离线核验的交付证据
 
 Evidence Pack 是一份可以脱离 Veristack 服务端独立核验的交付快照：
 
-```
+```text
 delivery-pack/
 ├── pack.json      # 元数据：清单摘要、证据清单、签名
 ├── manifest.json  # 交付清单快照
@@ -198,10 +225,12 @@ curl -X POST http://localhost:8080/api/v1/deliveries/{id}/pack \
 客户本地核验：
 
 ```bash
-veristack verify ./delivery-pack
+# 在仓库根目录构建 CLI；输出为 api/veristack，Windows 为 api\veristack.exe
+make cli-build
+./api/veristack verify ./delivery-pack
 ```
 
-```
+```text
 交付：官网改版 v1（基线 v2）
 清单摘要：a08b27008e6aaae1...
 
@@ -211,15 +240,15 @@ veristack verify ./delivery-pack
 结论：全部核验通过，交付内容与签名均有效
 ```
 
-内容被改动时，摘要与签名两项都会失败，CLI 返回非零退出码，可直接接入流水线做交付卡口。
+修改、删除或替换签名范围内的任一内容，摘要与签名校验都会失败，CLI 返回非零退出码，可直接接入流水线做交付卡口。
 
-格式契约见 [`api/contracts/evidence-pack/v1.md`](api/contracts/evidence-pack/v1.md)。
+格式契约见 [`api/contracts/evidence-pack/v2.md`](api/contracts/evidence-pack/v2.md)。
 
 ## 第三方平台接入
 
 为每个项目配置回调地址：
 
-```
+```text
 POST https://your-veristack/api/v1/webhooks/{github|gitlab|gitee}/projects/{projectId}
 ```
 
@@ -229,7 +258,7 @@ POST https://your-veristack/api/v1/webhooks/{github|gitlab|gitee}/projects/{proj
 | GitLab | `X-Gitlab-Token` | `VERISTACK_WEBHOOK_GITLABSECRET` |
 | Gitee | `X-Gitee-Token` | `VERISTACK_WEBHOOK_GITEESECRET` |
 
-事件先完整落库，再由后台 Worker 异步处理，不阻塞第三方回调。
+事件先完整落库，再由后台 Worker 异步处理，不阻塞第三方回调；重复投递通过幂等约束去重。
 
 ## AI 的边界
 
@@ -242,44 +271,73 @@ Veristack 里 AI 只承担它擅长的工作：提取候选需求、分析变更
 - 把未运行的测试标记为通过
 - 把推测的开发行为记录为真实事实
 
-所有 AI 产出都是待确认草稿，必须经人工采纳或忽略后才改变状态。采纳建议只标记建议本身生效，不会借此改写基线或交付结论。未配置模型密钥时，系统使用本地确定性规则，功能依然可用且结果可复现。
+所有 AI 产出都是待确认草稿，必须经人工采纳或忽略后才改变状态。未配置模型密钥时，系统使用本地确定性规则，功能依然可用且结果可复现。
 
-## 常用命令
+## 开发与测试
 
 ```bash
 make help          # 查看全部命令
 make api-run       # 本地运行 API
 make api-vet       # go vet 静态检查
+make api-test      # 后端单元测试
 make cli-build     # 编译 Evidence Pack 核验 CLI
-make web-dev       # 启动前端开发服务器
-make web-lint      # 前端 ESLint
+make web-install   # 安装前端依赖
+make web-lint      # ESLint
+make web-build     # 类型检查 + 生产构建
 make sqlc-gen      # 根据 SQL 重新生成类型安全代码
 make compose-up    # 启动完整容器环境
 ```
+
+提交 PR 前至少运行：
+
+```bash
+make api-vet
+make api-test
+make web-lint
+make web-build
+```
+
+CI 还会检查 `gofmt`、OpenAPI 逐字段契约、sqlc 生成代码无漂移。工作流见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
 
 ## 文档
 
 | 文档 | 内容 |
 | --- | --- |
-| [`docs/next-steps.md`](docs/next-steps.md) | **待办清单**：从 Alpha 到商业版的分级任务、验收标准与分工 |
-| [`docs/implementation-plan.md`](docs/implementation-plan.md) | 产品定位、需求清单、数据模型、API 设计与实现路线 |
-| [`docs/todo.md`](docs/todo.md) | 商业化审查报告（外部评审视角） |
-| [`docs/chatGPT-chat-history.md`](docs/chatGPT-chat-history.md) | 产品定位的推演过程与技术选型依据 |
-| [`deploy/docs/deployment.md`](deploy/docs/deployment.md) | 私有化部署、环境变量、备份恢复与常见问题 |
-| [`api/contracts/openapi/openapi.yaml`](api/contracts/openapi/openapi.yaml) | OpenAPI 3.1 接口契约 |
-| [`api/contracts/evidence-pack/v1.md`](api/contracts/evidence-pack/v1.md) | Evidence Pack 格式契约 |
-| [`agents.md`](agents.md) | 项目开发约定（通用原则 + 产品领域规则） |
-| [`api/agents.md`](api/agents.md) | 后端分层、持久化与安全约定 |
-| [`web/agents.md`](web/agents.md) | 前端组件、状态与视觉设计约定 |
+| [部署指南](deploy/docs/deployment.md) | Docker、环境变量、HTTPS、备份恢复与常见问题 |
+| [数据库说明](docs/database.md) | 本地迁移、注释核验与演示数据写入 |
+| [单元测试规范](docs/unit-test.md) | 测试范围、覆盖率要求与豁免流程 |
+| [OpenAPI 3.1](api/contracts/openapi/openapi.yaml) | 57 条路径、69 个操作的接口契约 |
+| [Evidence Pack v2](api/contracts/evidence-pack/v2.md) | Pack 结构与签名载荷 |
+| [路线图](docs/next-steps.md) | P0 / P1 / P2 任务、验收标准与后续计划 |
 
-## 路线图
+## 状态与路线图
 
-- [x] **阶段 0 · 基础层**：Chi + PostgreSQL + sqlc + Goose、认证、对象存储、双主题前端、容器编排
-- [x] **阶段 1 · 交付业务核心**：组织与用户、项目与成员、需求基线、变更申请与确认、里程碑
-- [x] **阶段 2 · 证据与验收**：交付清单、证据归档、客户分享链接、逐条验收、异议闭环、审计事件
-- [x] **阶段 3 · 自动化**：Webhook 接入、Outbox 任务队列、提交自动关联、CI 报告导入、AI 建议层
-- [x] **阶段 4 · 开放生态**：Evidence Pack 与独立核验 CLI、OpenAPI 契约、Gitee 接入、私有化部署文档
+**已具备：**
+
+- [x] 组织、项目、成员、需求基线、变更审批
+- [x] 交付清单、证据时间线、客户验收、异议闭环、审计事件
+- [x] GitHub / GitLab / Gitee Webhook、JUnit XML 导入、Outbox 异步任务
+- [x] Evidence Pack v2、Ed25519 签名、独立核验 CLI、OpenAPI 契约测试
+- [x] React 控制台、明暗双主题、Docker Compose 私有化部署
+
+**接下来：**
+
+- [ ] 生产级 S3 存储驱动
+- [ ] PostgreSQL 集成测试与 Playwright 端到端测试
+- [ ] 正式 Release、CHANGELOG、多架构镜像与备份恢复演练
+- [ ] OIDC / SSO、监控告警与更完整的通知事件
+- [ ] 真实团队试点与商业验证
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request。开始之前请阅读：
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)：开发流程、提交规范与 PR 检查项
+- [AGENTS.md](AGENTS.md)：全仓库通用开发约定
+- [api/agents.md](api/agents.md) / [web/agents.md](web/agents.md)：后端与前端的分层约定
+
+安全问题请不要公开提交 Issue，按 [SECURITY.md](SECURITY.md) 私下报告。
 
 ## 许可证
 
-Apache-2.0
+[Apache License 2.0](LICENSE) © 2026 Veristack contributors

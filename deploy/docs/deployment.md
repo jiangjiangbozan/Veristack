@@ -45,6 +45,13 @@ docker compose -f deploy/compose/docker-compose.yml ps
 | `VERISTACK_AUTH_SECRET` | 无（必填） | 会话令牌签名密钥，生产环境必须修改 |
 | `VERISTACK_AUTH_EXPIRESIN` | `24h` | 令牌有效期 |
 | `VERISTACK_SERVER_ADDR` | `:8080` | 监听地址 |
+| `VERISTACK_SERVER_PUBLICBASEURL` | `http://localhost:5173` | 前端公网地址，用于密码重置与通知邮件里的链接 |
+| `VERISTACK_SMTP_HOST` | 空 | SMTP 主机；留空时账户与通知邮件只输出到日志 |
+| `VERISTACK_SMTP_PORT` | `587` | SMTP 端口 |
+| `VERISTACK_SMTP_USERNAME` | 空 | SMTP 用户名 |
+| `VERISTACK_SMTP_PASSWORD` | 空 | SMTP 密码 |
+| `VERISTACK_SMTP_FROM` | 空 | 发件地址 |
+| `VERISTACK_SMTP_FROMNAME` | `Veristack` | 发件人显示名称 |
 | `VERISTACK_LOGLEVEL` | `info` | 日志级别 |
 | `VERISTACK_STORAGE_DRIVER` | `local` | 对象存储驱动，一期支持 `local` |
 | `VERISTACK_STORAGE_LOCALROOT` | `./data` | 证据附件与 Pack 存放目录 |

@@ -63,4 +63,4 @@ Veristack 面向专业交付场景，界面必须现代化、精致、美观，�
 1. 遵循开闭原则：新增功能尽量通过新增文件与扩展点完成，不大改已有接口和公共组件。
 2. 单元测试：`shared/lib`、状态映射、服务层纯函数与表单校验等业务逻辑必须附带单元测试，判定清单见 [`docs/unit-test.md`](../docs/unit-test.md)。纯展示组件豁免。
 3. 不允许使用 MCP 自行打开浏览器做测试或验证。
-4. 提交前运行 `npm run lint`、`npm run test` 与 `npm run build`，确保规范、测试与类型检查全部通过。
+4. 提交前运行 `npm run lint` 与 `npm run build`，确保规范与类型检查全部通过；前端测试框架接入后再补跑 `npm run test`。

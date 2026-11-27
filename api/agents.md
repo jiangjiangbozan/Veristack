@@ -1,6 +1,6 @@
 # API 开发约定（Go + Chi + PostgreSQL）
 
-本文件只约束 `api/` 目录。当前 `go.mod` 已引入 `github.com/go-chi/chi/v5 v5.5.0`；无任何源码，按模块化单体从零搭建。待引入 pgx、sqlc、Goose、validator 后补齐数据访问层。产品范围与数据模型见 `docs/implementation-plan.md`。
+本文件只约束 `api/` 目录。当前已落地 Go 1.27 + Chi + pgx + sqlc + Goose 的模块化单体：`cmd/server` 为入口，`internal/` 按业务模块分层，`platform/` 提供配置、数据库、审计、存储、Pack 等基础设施。新增能力沿用既有分层，不要另起架构。
 
 ## 分层与目录
 
