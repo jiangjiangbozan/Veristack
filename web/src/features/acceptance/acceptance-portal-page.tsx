@@ -1,7 +1,8 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, CircleSlash, FileText, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/field'
@@ -9,6 +10,7 @@ import { requestVerificationCode, verifyCustomerEmail } from '@/services/accepta
 import { fetchPortalDelivery, savePortalVerdict, submitPortalDecision } from '@/services/delivery-service'
 import { formatDateTime } from '@/shared/lib/datetime'
 import type { AcceptanceVerdict, ManifestCriterion } from '@/shared/types/delivery'
+import { ConfirmationEffects } from '@/features/acceptance/confirmation-effects'
 
 /** 客户验收门户页面，供客户通过分享链接逐条验收并给出结论。 */
 export function AcceptancePortalPage({ token }: { token: string }) {
@@ -18,6 +20,7 @@ export function AcceptancePortalPage({ token }: { token: string }) {
   const [comment, setComment] = useState('')
   const [objectionInputs, setObjectionInputs] = useState<Record<string, string>>({})
   const [result, setResult] = useState('')
+  const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery({ queryKey: ['portal', token], queryFn: () => fetchPortalDelivery(token) })
 
   const codeMutation = useMutation({ mutationFn: () => requestVerificationCode(token, email) })
@@ -28,6 +31,7 @@ export function AcceptancePortalPage({ token }: { token: string }) {
   const verdictMutation = useMutation({
     mutationFn: (input: { criterionKey: string; verdict: string }) =>
       savePortalVerdict(token, input.criterionKey, { comment: '', email, verdict: input.verdict }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['portal', token] }),
   })
   const decisionMutation = useMutation({
     mutationFn: (value: string) =>
@@ -39,7 +43,10 @@ export function AcceptancePortalPage({ token }: { token: string }) {
           .filter(([, text]) => text.trim() !== '')
           .map(([criterionKey, text]) => ({ comment: text, criterionKey })),
       }),
-    onSuccess: () => setResult('验收结论已提交，开发团队将收到你的确认。'),
+    onSuccess: () => {
+      setResult('验收结论已提交，开发团队将收到你的确认。')
+      void queryClient.invalidateQueries({ queryKey: ['portal', token] })
+    },
   })
 
   if (isLoading) {
@@ -118,6 +125,7 @@ export function AcceptancePortalPage({ token }: { token: string }) {
 
       <section className="space-y-4 border-t py-8">
         <h2 className="text-lg font-medium">给出最终结论</h2>
+        <ConfirmationEffects />
         <Textarea label="总体说明" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="简要说明你的验收意见" />
         <div className="flex flex-col gap-3 sm:flex-row">
           <Button disabled={!isVerified || decisionMutation.isPending} onClick={() => decisionMutation.mutate('approve')}>
@@ -128,7 +136,7 @@ export function AcceptancePortalPage({ token }: { token: string }) {
           </Button>
         </div>
         {decisionMutation.isError && (
-          <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">提交失败，请稍后重试。</p>
+          <Alert title="提交失败" tone="danger">请稍后重试，或联系项目方重新获取验收链接。</Alert>
         )}
         {result && (
           <div className="flex items-center gap-2 rounded-md bg-success/10 px-3 py-2 text-sm text-success">

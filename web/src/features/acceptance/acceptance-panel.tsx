@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/field'
 import { createShareToken, fetchAcceptanceSummary, replyObjection, resolveObjection, submitDelivery } from '@/services/delivery-service'
 import { formatDateTime } from '@/shared/lib/datetime'
 import type { Objection } from '@/shared/types/delivery'
+import { ConfirmationEffects } from '@/features/acceptance/confirmation-effects'
 
 /** 验收面板，展示客户裁定与异议，并管理客户分享链接。 */
 export function AcceptancePanel({ deliveryId }: { deliveryId: string }) {
@@ -65,6 +66,8 @@ export function AcceptancePanel({ deliveryId }: { deliveryId: string }) {
           </CardContent>
         </Card>
       )}
+
+      <ConfirmationEffects />
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
 

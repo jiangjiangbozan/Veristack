@@ -1,3 +1,15 @@
+/** 审计事件视图。 */
+export interface AuditEventView {
+  action: string
+  actorId: string
+  actorName: string
+  id: string
+  ip: string
+  objectId: string
+  objectType: string
+  occurredAt: string
+}
+
 /** 交付版本视图。 */
 export interface DeliveryView {
   baselineVersion: number

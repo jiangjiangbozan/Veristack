@@ -1,13 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileUp, Link2 } from 'lucide-react'
+import { Download, FileUp } from 'lucide-react'
 import { useRef, useState } from 'react'
 
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input, Select, Textarea } from '@/components/ui/field'
 import { Modal } from '@/components/ui/modal'
-import { createManualEvidence, listEvidence, uploadEvidence } from '@/services/delivery-service'
+import { createManualEvidence, downloadEvidenceFile, listEvidence, uploadEvidence } from '@/services/delivery-service'
 import { formatDateTime } from '@/shared/lib/datetime'
 import type { EvidenceView } from '@/shared/types/delivery'
 
@@ -61,6 +62,27 @@ export function EvidencePanel({ deliveryId }: { deliveryId: string }) {
 
 /** 时间线上的单条证据，展示类型、摘要与来源。 */
 function EvidenceTimelineItem({ item }: { item: EvidenceView }) {
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function onDownload() {
+    setIsDownloading(true)
+    setError('')
+    try {
+      const blob = await downloadEvidenceFile(item.id)
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `veristack-evidence-${item.id.slice(0, 8)}`
+      anchor.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '下载失败')
+    } finally {
+      setIsDownloading(false)
+    }
+  }
+
   return (
     <li className="relative">
       <span className="absolute -left-[1.6rem] top-2 size-2.5 rounded-full bg-primary" />
@@ -76,12 +98,13 @@ function EvidenceTimelineItem({ item }: { item: EvidenceView }) {
             {item.source && <span>来源：{item.source}</span>}
             {item.sha256 && <span className="truncate">摘要：{item.sha256.slice(0, 16)}…</span>}
             {item.fileKey && (
-              <span className="inline-flex items-center gap-1 text-primary">
-                <Link2 className="size-3" />
-                含附件
-              </span>
+              <button className="inline-flex items-center gap-1 text-primary disabled:opacity-50" disabled={isDownloading} onClick={onDownload} type="button">
+                <Download className="size-3" />
+                {isDownloading ? '下载中…' : '下载附件'}
+              </button>
             )}
           </div>
+          {error && <p className="text-xs text-danger">{error}</p>}
         </CardContent>
       </Card>
     </li>
@@ -101,6 +124,10 @@ function EvidenceForm({ deliveryId, onCreated }: { deliveryId: string; onCreated
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (!title.trim() || !note.trim()) {
+      setError('请填写证据标题和说明。')
+      return
+    }
     setError('')
     setIsSubmitting(true)
     try {
@@ -124,7 +151,7 @@ function EvidenceForm({ deliveryId, onCreated }: { deliveryId: string; onCreated
   }
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" noValidate onSubmit={onSubmit}>
       <Input label="证据标题" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：首页深色模式截图" />
       <Select label="证据类型" value={type} onChange={(e) => setType(e.target.value)}>
         {Object.entries(evidenceTypeLabels).map(([value, label]) => (
@@ -142,7 +169,7 @@ function EvidenceForm({ deliveryId, onCreated }: { deliveryId: string; onCreated
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         />
       </div>
-      {error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <Alert title="无法登记证据" tone="danger">{error}</Alert>}
       <Button className="w-full" disabled={isSubmitting} type="submit">{isSubmitting ? '登记中…' : '登记证据'}</Button>
     </form>
   )

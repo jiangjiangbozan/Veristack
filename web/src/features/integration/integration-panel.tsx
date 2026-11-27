@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, CircleSlash, Sparkles, Webhook } from 'lucide-react'
 import { useState } from 'react'
 
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -12,6 +13,7 @@ import {
   dismissSuggestion,
   extractRequirements,
   importCIReport,
+  listCIReports,
   listSuggestions,
   listWebhooks,
 } from '@/services/integration-service'
@@ -31,10 +33,12 @@ export function IntegrationPanel({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
   const suggestionsQuery = useQuery({ queryKey: ['suggestions', projectId], queryFn: () => listSuggestions(projectId) })
   const webhooksQuery = useQuery({ queryKey: ['webhooks', projectId], queryFn: () => listWebhooks(projectId) })
+  const ciReportsQuery = useQuery({ queryKey: ['ci-reports', projectId], queryFn: () => listCIReports(projectId) })
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['suggestions', projectId] })
     await queryClient.invalidateQueries({ queryKey: ['webhooks', projectId] })
+    await queryClient.invalidateQueries({ queryKey: ['ci-reports', projectId] })
   }
 
   return (
@@ -51,6 +55,29 @@ export function IntegrationPanel({ projectId }: { projectId: string }) {
           </Button>
         </div>
       </header>
+
+      <Card>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-medium">CI 测试报告</h3>
+            <Badge>{ciReportsQuery.data?.items.length ?? 0} 份</Badge>
+          </div>
+          {ciReportsQuery.data?.items.length === 0 && (
+            <p className="text-sm text-muted-foreground">尚未导入 CI 报告。导入 JUnit XML 后，通过、失败与跳过数量会进入交付证据链。</p>
+          )}
+          <ul className="space-y-2">
+            {ciReportsQuery.data?.items.map((report) => (
+              <li className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface-muted p-3" key={report.id}>
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium">{report.provider} · {report.buildNo || '未命名构建'}</p>
+                  <p className="text-xs text-muted-foreground">导入于 {formatDateTime(report.createdAt)}</p>
+                </div>
+                <Badge tone="info">已归档</Badge>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="space-y-3">
@@ -185,6 +212,10 @@ function CIReportForm({ onCreated, projectId }: { onCreated: () => Promise<void>
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (!reportXml.trim()) {
+      setError('请粘贴 JUnit XML 测试报告。')
+      return
+    }
     setError('')
     setIsSubmitting(true)
     try {
@@ -198,7 +229,7 @@ function CIReportForm({ onCreated, projectId }: { onCreated: () => Promise<void>
   }
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" noValidate onSubmit={onSubmit}>
       <Select label="来源平台" value={provider} onChange={(e) => setProvider(e.target.value)}>
         <option value="github">GitHub</option>
         <option value="gitlab">GitLab</option>
@@ -209,7 +240,7 @@ function CIReportForm({ onCreated, projectId }: { onCreated: () => Promise<void>
         <Input label="Git 提交" value={gitRef} onChange={(e) => setGitRef(e.target.value)} placeholder="选填" />
       </div>
       <Textarea label="测试报告（JUnit XML）" required value={reportXml} onChange={(e) => setReportXml(e.target.value)} placeholder="粘贴 CI 产出的 test-results.xml" />
-      {error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <Alert title="无法导入 CI 报告" tone="danger">{error}</Alert>}
       <Button className="w-full" disabled={isSubmitting} type="submit">{isSubmitting ? '导入中…' : '导入并汇总'}</Button>
     </form>
   )
@@ -227,6 +258,10 @@ function RequirementExtractForm({ onCreated, projectId }: { onCreated: () => Pro
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (!content.trim()) {
+      setError('请粘贴原始需求文档。')
+      return
+    }
     setError('')
     setIsSubmitting(true)
     try {
@@ -239,10 +274,10 @@ function RequirementExtractForm({ onCreated, projectId }: { onCreated: () => Pro
   }
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" noValidate onSubmit={onSubmit}>
       <Textarea label="原始需求文档" required value={content} onChange={(e) => setContent(e.target.value)} placeholder="粘贴客户原始需求文本，每行一条便于识别" />
       <p className="text-xs text-muted-foreground">提取结果为候选建议，需人工确认后才会进入需求基线。</p>
-      {error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <Alert title="无法生成候选需求" tone="danger">{error}</Alert>}
       <Button className="w-full" disabled={isSubmitting} type="submit">{isSubmitting ? '分析中…' : '生成候选需求'}</Button>
     </form>
   )

@@ -11,10 +11,12 @@ import { DeliveryPanel } from '@/features/deliveries/delivery-panel'
 import { IntegrationPanel } from '@/features/integration/integration-panel'
 import { MilestonePanel } from '@/features/milestones/milestone-panel'
 import { BaselinePanel } from '@/features/scope/baseline-panel'
+import { MemberPanel } from '@/features/projects/member-panel'
+import { ProjectActions } from '@/features/projects/project-actions'
 import { fetchOverview, fetchProject } from '@/services/project-service'
 import { formatDate } from '@/shared/lib/datetime'
 
-type TabKey = 'baselines' | 'changes' | 'deliveries' | 'integration' | 'milestones' | 'overview'
+type TabKey = 'baselines' | 'changes' | 'deliveries' | 'integration' | 'members' | 'milestones' | 'overview'
 
 const tabs: Array<{ key: TabKey; label: string }> = [
   { key: 'overview', label: '概览' },
@@ -23,6 +25,7 @@ const tabs: Array<{ key: TabKey; label: string }> = [
   { key: 'milestones', label: '里程碑' },
   { key: 'deliveries', label: '交付版本' },
   { key: 'integration', label: '自动化集成' },
+  { key: 'members', label: '项目成员' },
 ]
 
 /** 项目详情页，按任务路径组织需求、变更与里程碑。 */
@@ -56,6 +59,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               客户：{project.clientName} · 周期：{formatDate(project.startDate)} 至 {formatDate(project.endDate)}
             </p>
           </div>
+          <ProjectActions project={project} />
         </header>
       </div>
 
@@ -83,6 +87,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         {activeTab === 'milestones' && <MilestonePanel projectId={projectId} />}
         {activeTab === 'deliveries' && <DeliveryPanel projectId={projectId} />}
         {activeTab === 'integration' && <IntegrationPanel projectId={projectId} />}
+        {activeTab === 'members' && <MemberPanel projectId={projectId} />}
       </div>
     </section>
   )

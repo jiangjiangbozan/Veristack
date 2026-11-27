@@ -1,6 +1,7 @@
 import { request } from '@/services/http-client'
 import type { ApiPage } from '@/shared/types/api'
 import type {
+  BaselineDiff,
   BaselineView,
   ChangeRequestView,
   MemberView,
@@ -73,6 +74,45 @@ export function createMilestone(
   })
 }
 
+/** 导入项目的需求输入。 */
+export interface ImportRequirementInput {
+  acceptanceCriteria: string[] // 验收条件
+  code: string // 需求编号
+  description: string // 需求描述
+  priority: string // 优先级
+  title: string // 需求标题
+}
+
+/** 导入项目的里程碑输入。 */
+export interface ImportMilestoneInput {
+  name: string // 里程碑名称
+  requirementCodes: string[] // 关联需求编号
+  targetDate: string // 目标日期
+}
+
+/** 导入已有项目的请求体。 */
+export interface ImportProjectPayload {
+  milestones: ImportMilestoneInput[] // 里程碑列表
+  project: {
+    clientName: string // 客户名称
+    contractNo: string // 合同编号
+    description: string // 项目描述
+    endDate: string // 结束日期
+    name: string // 项目名称
+    startDate: string // 开始日期
+  }
+  requirements: ImportRequirementInput[] // 初始需求列表
+}
+
+/** 导入已有项目，一次请求内创建项目、v1 基线与里程碑。 */
+export function importProject(payload: ImportProjectPayload): Promise<{
+  milestoneCount: number
+  project: ProjectView
+  requirementCount: number
+}> {
+  return request('/projects/import', { body: JSON.stringify(payload), method: 'POST' })
+}
+
 /** 创建项目。 */
 export function createProject(payload: {
   clientName: string
@@ -95,6 +135,11 @@ export function decideChangeRequest(
     body: JSON.stringify({ comment, decision }),
     method: 'POST',
   })
+}
+
+/** 对比两个需求基线。 */
+export function fetchBaselineDiff(baselineId: string, againstId: string): Promise<BaselineDiff> {
+  return request(`/scope-baselines/${baselineId}/diff?against=${againstId}`)
 }
 
 /** 删除里程碑。 */
@@ -140,6 +185,11 @@ export function listMilestones(projectId: string): Promise<{ items: MilestoneVie
 /** 分页列出项目。 */
 export function listProjects(page = 1, pageSize = 20): Promise<PageResult<ProjectView>> {
   return request(`/projects?page=${page}&pageSize=${pageSize}`)
+}
+
+/** 移除项目成员。 */
+export function removeMember(projectId: string, userId: string): Promise<{ deleted: boolean }> {
+  return request(`/projects/${projectId}/members/${userId}`, { method: 'DELETE' })
 }
 
 /** 更新里程碑。 */

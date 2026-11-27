@@ -1,6 +1,7 @@
-import { request } from '@/services/http-client'
+import { request, requestBlob } from '@/services/http-client'
 import type {
   AcceptanceVerdict,
+  AuditEventView,
   DeliveryView,
   EvidenceView,
   Manifest,
@@ -60,6 +61,11 @@ export function fetchManifest(deliveryId: string): Promise<Manifest> {
 /** 列出交付版本的证据时间线。 */
 export function listEvidence(deliveryId: string): Promise<{ items: EvidenceView[] }> {
   return request(`/deliveries/${deliveryId}/evidence`)
+}
+
+/** 列出交付版本的操作审计时间线。 */
+export function listAuditEvents(deliveryId: string): Promise<{ items: AuditEventView[] }> {
+  return request(`/deliveries/${deliveryId}/audit-events`)
 }
 
 /** 列出项目交付版本。 */
@@ -134,6 +140,7 @@ export function uploadEvidence(
 /** 导出 Evidence Pack 的结果。 */
 export interface PackExportResult {
   downloadUrl: string
+  exportId: string
   manifestSha256: string
   packPath: string
   signed: boolean
@@ -142,4 +149,14 @@ export interface PackExportResult {
 /** 导出 Evidence Pack，供客户或第三方离线核验交付内容。 */
 export function exportPack(deliveryId: string): Promise<PackExportResult> {
   return request(`/deliveries/${deliveryId}/pack`, { body: '{}', method: 'POST' })
+}
+
+/** 下载证据附件，需带访问令牌。 */
+export function downloadEvidenceFile(evidenceId: string): Promise<Blob> {
+  return requestBlob(`/evidence/${evidenceId}/file`)
+}
+
+/** 下载指定导出快照的 ZIP 包，需带访问令牌，不能直接用链接跳转。 */
+export function downloadPackArchive(deliveryId: string, exportId: string): Promise<Blob> {
+  return requestBlob(`/deliveries/${deliveryId}/packs/${exportId}/download`)
 }

@@ -1,5 +1,5 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { ArrowLeft, GitCommitHorizontal, Hash, PackageCheck } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeft, Download, GitCommitHorizontal, Hash, PackageCheck, Sparkles } from 'lucide-react'
 import { Link, useNavigate } from '@tanstack/react-router'
 
 import { Badge } from '@/components/ui/badge'
@@ -7,15 +7,17 @@ import { toneForStatus } from '@/components/ui/badge-tone'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { AcceptancePanel } from '@/features/acceptance/acceptance-panel'
+import { AuditPanel } from '@/features/deliveries/audit-panel'
 import { EvidencePanel } from '@/features/evidence/evidence-panel'
-import { exportPack, fetchDelivery, fetchManifest, type PackExportResult } from '@/services/delivery-service'
+import { downloadPackArchive, exportPack, fetchDelivery, fetchManifest, type PackExportResult } from '@/services/delivery-service'
+import { generateDeliverySummary } from '@/services/integration-service'
 import { formatDateTime } from '@/shared/lib/datetime'
 import { useState } from 'react'
 
-/** 交付详情页，集中展示交付清单、证据时间线与客户验收。 */
+/** 交付详情页，集中展示交付清单、证据时间线、操作审计与客户验收。 */
 export function DeliveryDetailPage({ deliveryId }: { deliveryId: string }) {
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState<'acceptance' | 'evidence' | 'manifest'>('manifest')
+  const [activeTab, setActiveTab] = useState<'acceptance' | 'audit' | 'evidence' | 'manifest'>('manifest')
   const { data: manifest } = useQuery({ queryKey: ['manifest', deliveryId], queryFn: () => fetchManifest(deliveryId) })
   const { data: delivery } = useQuery({ queryKey: ['delivery', deliveryId], queryFn: () => fetchDelivery(deliveryId) })
 
@@ -46,6 +48,7 @@ export function DeliveryDetailPage({ deliveryId }: { deliveryId: string }) {
         {([
           { key: 'manifest' as const, label: '交付清单' },
           { key: 'evidence' as const, label: '证据时间线' },
+          { key: 'audit' as const, label: '操作审计' },
           { key: 'acceptance' as const, label: '客户验收' },
         ]).map((tab) => (
           <button
@@ -64,8 +67,9 @@ export function DeliveryDetailPage({ deliveryId }: { deliveryId: string }) {
       </nav>
 
       <div>
-        {activeTab === 'manifest' && <ManifestTab deliveryId={deliveryId} />}
+        {activeTab === 'manifest' && <ManifestTab createdAt={delivery?.delivery.createdAt} deliveryId={deliveryId} projectId={delivery?.delivery.projectId ?? ''} />}
         {activeTab === 'evidence' && <EvidencePanel deliveryId={deliveryId} />}
+        {activeTab === 'audit' && <AuditPanel deliveryId={deliveryId} />}
         {activeTab === 'acceptance' && <AcceptancePanel deliveryId={deliveryId} />}
       </div>
     </section>
@@ -73,13 +77,61 @@ export function DeliveryDetailPage({ deliveryId }: { deliveryId: string }) {
 }
 
 /** 交付清单标签页，展示冻结的需求与验收条件。 */
-function ManifestTab({ deliveryId }: { deliveryId: string }) {
+function ManifestTab({ createdAt, deliveryId, projectId }: { createdAt?: string; deliveryId: string; projectId: string }) {
   const [packResult, setPackResult] = useState<PackExportResult | null>(null)
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState('')
+  const [summary, setSummary] = useState('')
+  const [isSummarizing, setIsSummarizing] = useState(false)
+  const [summaryError, setSummaryError] = useState('')
+  const queryClient = useQueryClient()
   const { data: manifest, isLoading } = useQuery({ queryKey: ['manifest', deliveryId], queryFn: () => fetchManifest(deliveryId) })
   const packMutation = useMutation({
     mutationFn: () => exportPack(deliveryId),
-    onSuccess: (result) => setPackResult(result),
+    onSuccess: async (result) => {
+      setPackResult(result)
+      // 导出会写入审计事件，刷新时间线让操作立即可见。
+      await queryClient.invalidateQueries({ queryKey: ['audit', deliveryId] })
+    },
   })
+
+  async function onDownloadPack() {
+    if (!packResult) {
+      return
+    }
+    setIsDownloading(true)
+    setDownloadError('')
+    try {
+      const blob = await downloadPackArchive(deliveryId, packResult.exportId)
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `veristack-delivery-v${manifest?.version ?? 0}-${packResult.exportId.slice(0, 8)}.zip`
+      anchor.click()
+      // 立即回收会让部分浏览器取消下载，延迟释放更稳妥。
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : '下载失败')
+    } finally {
+      setIsDownloading(false)
+    }
+  }
+
+  async function onSummarize() {
+    if (!projectId) {
+      return
+    }
+    setIsSummarizing(true)
+    setSummaryError('')
+    try {
+      const result = await generateDeliverySummary(projectId, deliveryId)
+      setSummary(result.suggestion.content.summary || 'AI 未生成摘要内容。')
+    } catch (err) {
+      setSummaryError(err instanceof Error ? err.message : '生成摘要失败')
+    } finally {
+      setIsSummarizing(false)
+    }
+  }
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">加载交付清单…</p>
@@ -103,20 +155,49 @@ function ManifestTab({ deliveryId }: { deliveryId: string }) {
             </span>
           )}
           <Badge tone="success">不可覆盖</Badge>
-          <Button className="ml-auto" disabled={packMutation.isPending} onClick={() => packMutation.mutate()} size="sm" variant="outline">
+          <Button className="ml-auto" disabled={!projectId || isSummarizing} onClick={onSummarize} size="sm" variant="outline">
+            <Sparkles className="size-4" />
+            {isSummarizing ? '生成中…' : 'AI 交付摘要'}
+          </Button>
+          <Button disabled={packMutation.isPending} onClick={() => packMutation.mutate()} size="sm" variant="outline">
             <PackageCheck className="size-4" />
             导出核验包
           </Button>
         </CardContent>
       </Card>
-      {packResult && (
+      {summaryError && <p className="text-xs text-danger">{summaryError}</p>}
+      {summary && (
         <Card>
           <CardContent className="space-y-2">
-            <p className="text-sm font-medium">Evidence Pack 已生成</p>
+            <h2 className="flex items-center gap-2 text-sm font-medium">
+              <Sparkles className="size-4 text-primary" />
+              AI 交付摘要
+            </h2>
+            <p className="whitespace-pre-wrap text-sm text-muted-foreground">{summary}</p>
+            <p className="text-xs text-muted-foreground">摘要为草稿建议，需人工确认后使用，不改变正式交付结论。</p>
+          </CardContent>
+        </Card>
+      )}
+      {packMutation.isError && (
+        <p className="text-xs text-danger">
+          导出失败：{packMutation.error instanceof Error ? packMutation.error.message : '请稍后重试'}
+        </p>
+      )}
+      {packResult && (
+        <Card>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm font-medium">Evidence Pack 已生成</p>
+              <Button disabled={isDownloading} onClick={onDownloadPack} size="sm" variant="outline">
+                <Download className="size-4" />
+                {isDownloading ? '打包中…' : '下载 ZIP'}
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground">清单摘要 {packResult.manifestSha256}</p>
             <p className="text-xs text-muted-foreground">
               {packResult.signed ? '已附带 Ed25519 签名，客户可使用 veristack verify 离线核验。' : '当前服务未配置签名私钥，客户只能校验内容摘要。'}
             </p>
+            {downloadError && <p className="text-xs text-danger">{downloadError}</p>}
           </CardContent>
         </Card>
       )}
@@ -139,7 +220,7 @@ function ManifestTab({ deliveryId }: { deliveryId: string }) {
           </li>
         ))}
       </ul>
-      <p className="text-xs text-muted-foreground">生成时间 {formatDateTime(new Date().toISOString())}</p>
+      {createdAt && <p className="text-xs text-muted-foreground">交付版本创建于 {formatDateTime(createdAt)}</p>}
     </div>
   )
 }

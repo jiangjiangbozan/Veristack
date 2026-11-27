@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { toneForStatus } from '@/components/ui/badge-tone'
 import { Button } from '@/components/ui/button'
@@ -102,6 +103,10 @@ function MilestoneForm({ onCreated, projectId }: { onCreated: () => Promise<void
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
+    if (!name.trim()) {
+      setError('请输入里程碑名称。')
+      return
+    }
     setError('')
     setIsSubmitting(true)
     try {
@@ -115,10 +120,10 @@ function MilestoneForm({ onCreated, projectId }: { onCreated: () => Promise<void
   }
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" noValidate onSubmit={onSubmit}>
       <Input label="里程碑名称" required value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：完成首页" />
       <Input label="目标日期" type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
-      {error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <Alert title="无法创建里程碑" tone="danger">{error}</Alert>}
       <Button className="w-full" disabled={isSubmitting} type="submit">{isSubmitting ? '创建中…' : '创建里程碑'}</Button>
     </form>
   )

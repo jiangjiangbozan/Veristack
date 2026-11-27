@@ -1,14 +1,15 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input, Select, Textarea } from '@/components/ui/field'
 import { Modal } from '@/components/ui/modal'
-import { createBaseline, listBaselines } from '@/services/project-service'
+import { createBaseline, fetchBaselineDiff, listBaselines } from '@/services/project-service'
 import { formatDateTime } from '@/shared/lib/datetime'
-import type { RequirementView } from '@/shared/types/domain'
+import type { BaselineView, RequirementView } from '@/shared/types/domain'
 
 interface RequirementDraft {
   acceptanceCriteria: string
@@ -25,6 +26,7 @@ function emptyRequirement(index: number): RequirementDraft {
 /** 需求范围面板，展示基线演进并支持冻结新基线。 */
 export function BaselinePanel({ projectId }: { projectId: string }) {
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [diffPair, setDiffPair] = useState<{ base: BaselineView; against: BaselineView } | null>(null)
   const queryClient = useQueryClient()
   const { data, isLoading } = useQuery({ queryKey: ['baselines', projectId], queryFn: () => listBaselines(projectId) })
   const baselines = data?.items ?? []
@@ -45,25 +47,90 @@ export function BaselinePanel({ projectId }: { projectId: string }) {
       {!isLoading && baselines.length === 0 && (
         <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">尚无需求基线，创建后即可冻结为正式版本。</CardContent></Card>
       )}
-      {baselines.slice().reverse().map((baseline) => (
-        <Card key={baseline.id}>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-base font-medium">版本 v{baseline.version}</span>
-                <Badge tone="success">已冻结</Badge>
+      {baselines.slice().reverse().map((baseline) => {
+        const previous = baselines.find((item) => item.version === baseline.version - 1)
+        return (
+          <Card key={baseline.id}>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-base font-medium">版本 v{baseline.version}</span>
+                  <Badge tone="success">已冻结</Badge>
+                </div>
+                <div className="flex items-center gap-3">
+                  {previous && (
+                    <Button onClick={() => setDiffPair({ against: previous, base: baseline })} size="sm" variant="outline">
+                      对比 v{previous.version}
+                    </Button>
+                  )}
+                  <span className="text-xs text-muted-foreground">{formatDateTime(baseline.frozenAt)}</span>
+                </div>
               </div>
-              <span className="text-xs text-muted-foreground">{formatDateTime(baseline.frozenAt)}</span>
-            </div>
-            <RequirementList requirements={baseline.requirements} />
-          </CardContent>
-        </Card>
-      ))}
+              <RequirementList requirements={baseline.requirements} />
+            </CardContent>
+          </Card>
+        )
+      })}
+      {diffPair && (
+        <Modal onClose={() => setDiffPair(null)} title={`基线 v${diffPair.base.version} 对比 v${diffPair.against.version}`}>
+          <BaselineDiffContent against={diffPair.base.id} baselineId={diffPair.against.id} />
+        </Modal>
+      )}
       {isCreateOpen && (
         <Modal onClose={() => setIsCreateOpen(false)} title="新建需求基线">
           <BaselineForm projectId={projectId} onCreated={onCreated} />
         </Modal>
       )}
+    </div>
+  )
+}
+
+/** 基线差异内容，按新增、修改、删除三组展示需求变化。 */
+function BaselineDiffContent({ baselineId, against }: { baselineId: string; against: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['baseline-diff', baselineId, against],
+    queryFn: () => fetchBaselineDiff(baselineId, against),
+  })
+
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground">正在对比基线…</p>
+  }
+  if (!data) {
+    return <p className="text-sm text-danger">基线对比失败，请稍后重试。</p>
+  }
+  const total = data.added.length + data.modified.length + data.removed.length
+  if (total === 0) {
+    return <p className="text-sm text-muted-foreground">两个基线的需求完全一致。</p>
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">新增 {data.added.length} 条、修改 {data.modified.length} 条、删除 {data.removed.length} 条。</p>
+      <DiffSection label="新增需求" requirements={data.added} tone="success" />
+      <DiffSection label="修改需求" requirements={data.modified} tone="warning" />
+      <DiffSection label="删除需求" requirements={data.removed} tone="danger" />
+    </div>
+  )
+}
+
+/** 单组差异需求列表。 */
+function DiffSection({ label, requirements, tone }: { label: string; requirements: RequirementView[]; tone: 'danger' | 'success' | 'warning' }) {
+  if (requirements.length === 0) {
+    return null
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium">{label}</span>
+        <Badge tone={tone}>{requirements.length}</Badge>
+      </div>
+      <ul className="space-y-1.5">
+        {requirements.map((requirement) => (
+          <li className="rounded-md bg-surface-muted px-3 py-2 text-sm" key={requirement.id}>
+            <span className="font-medium">{requirement.code}</span> · {requirement.title}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -80,6 +147,11 @@ function BaselineForm({ onCreated, projectId }: { onCreated: () => void | Promis
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
+    const invalidIndex = drafts.findIndex((item) => !item.code.trim() || !item.title.trim())
+    if (invalidIndex >= 0) {
+      setError(`请填写需求 ${invalidIndex + 1} 的编号和标题。`)
+      return
+    }
     setError('')
     setIsSubmitting(true)
     try {
@@ -99,7 +171,7 @@ function BaselineForm({ onCreated, projectId }: { onCreated: () => void | Promis
   }
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" noValidate onSubmit={onSubmit}>
       {drafts.map((draft, index) => (
         <div className="space-y-3 rounded-lg border p-4" key={index}>
           <div className="flex items-center justify-between">
@@ -122,7 +194,7 @@ function BaselineForm({ onCreated, projectId }: { onCreated: () => void | Promis
         </div>
       ))}
       <Button size="sm" type="button" variant="outline" onClick={() => setDrafts((current) => [...current, emptyRequirement(current.length)])}>添加需求</Button>
-      {error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <Alert title="无法创建基线" tone="danger">{error}</Alert>}
       <Button className="w-full" disabled={isSubmitting} type="submit">{isSubmitting ? '创建中…' : '创建并冻结'}</Button>
     </form>
   )

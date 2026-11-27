@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { toneForStatus } from '@/components/ui/badge-tone'
 import { Button } from '@/components/ui/button'
@@ -88,6 +89,15 @@ function DeliveryForm({ onCreated, projectId }: { onCreated: () => Promise<void>
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (!baselineVersion) {
+      setError('请选择需求基线版本。')
+      return
+    }
+    const deliveryVersion = Number(version)
+    if (!Number.isInteger(deliveryVersion) || deliveryVersion < 1) {
+      setError('交付版本号必须是大于等于 1 的整数。')
+      return
+    }
     setError('')
     setIsSubmitting(true)
     try {
@@ -96,7 +106,7 @@ function DeliveryForm({ onCreated, projectId }: { onCreated: () => Promise<void>
         buildNo,
         gitRef,
         milestoneIds: [],
-        version: Number(version),
+        version: deliveryVersion,
       })
       await onCreated()
     } catch (err) {
@@ -107,7 +117,7 @@ function DeliveryForm({ onCreated, projectId }: { onCreated: () => Promise<void>
   }
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" noValidate onSubmit={onSubmit}>
       <Select label="需求基线版本" required value={baselineVersion} onChange={(e) => setBaselineVersion(e.target.value)}>
         <option value="">请选择基线</option>
         {baselineList.map((baseline) => (
@@ -119,7 +129,7 @@ function DeliveryForm({ onCreated, projectId }: { onCreated: () => Promise<void>
         <Input label="构建号" value={buildNo} onChange={(e) => setBuildNo(e.target.value)} placeholder="选填" />
       </div>
       <Input label="Git 提交或标签" value={gitRef} onChange={(e) => setGitRef(e.target.value)} placeholder="选填" />
-      {error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <Alert title="无法创建交付" tone="danger">{error}</Alert>}
       <Button className="w-full" disabled={isSubmitting} type="submit">{isSubmitting ? '创建中…' : '创建并冻结清单'}</Button>
     </form>
   )

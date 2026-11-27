@@ -1,6 +1,8 @@
+import { Sparkles } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { toneForStatus } from '@/components/ui/badge-tone'
 import { Button } from '@/components/ui/button'
@@ -8,6 +10,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input, Select, Textarea } from '@/components/ui/field'
 import { Modal } from '@/components/ui/modal'
 import { createChangeRequest, decideChangeRequest, listChangeRequests } from '@/services/project-service'
+import { analyzeChangeImpact } from '@/services/integration-service'
 import { formatDateTime } from '@/shared/lib/datetime'
 import type { ChangeRequestView } from '@/shared/types/domain'
 
@@ -50,6 +53,8 @@ function ChangeCard({ change, onDecided }: { change: ChangeRequestView; onDecide
   const [comment, setComment] = useState('')
   const [isDeciding, setIsDeciding] = useState(false)
   const [error, setError] = useState('')
+  const [analysis, setAnalysis] = useState<{ notes: string[]; summary: string } | null>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
 
   async function onDecision(decision: string) {
     setIsDeciding(true)
@@ -64,6 +69,19 @@ function ChangeCard({ change, onDecided }: { change: ChangeRequestView; onDecide
     }
   }
 
+  async function onAnalyze() {
+    setIsAnalyzing(true)
+    setError('')
+    try {
+      const result = await analyzeChangeImpact(change.projectId, change.id)
+      setAnalysis({ notes: result.suggestion.content.impactNotes, summary: result.suggestion.content.summary })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '分析失败')
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
   return (
     <Card>
       <CardContent className="space-y-3">
@@ -73,10 +91,25 @@ function ChangeCard({ change, onDecided }: { change: ChangeRequestView; onDecide
         </div>
         {change.impact && <p className="text-sm text-muted-foreground">影响：{change.impact}</p>}
         <p className="text-xs text-muted-foreground">发起于 {formatDateTime(change.createdAt)}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button disabled={isAnalyzing} onClick={onAnalyze} size="sm" variant="outline">
+            <Sparkles className="size-4" />
+            {isAnalyzing ? '分析中…' : 'AI 影响分析'}
+          </Button>
+          {analysis && <span className="text-xs text-muted-foreground">AI 建议仅供评审参考，不改变正式基线。</span>}
+        </div>
+        {analysis && (
+          <div className="space-y-1 rounded-lg bg-surface-muted p-3 text-sm text-muted-foreground">
+            {analysis.summary && <p>{analysis.summary}</p>}
+            {analysis.notes.map((note, index) => (
+              <p key={index}>· {note}</p>
+            ))}
+          </div>
+        )}
+        {error && <p className="text-sm text-danger">{error}</p>}
         {change.status === 'pending' && (
           <div className="space-y-2 border-t pt-3">
             <Input label="决定意见（选填）" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="填写确认或拒绝的说明" />
-            {error && <p className="text-sm text-danger">{error}</p>}
             <div className="flex gap-2">
               <Button disabled={isDeciding} size="sm" onClick={() => onDecision('approve')}>批准并生成新基线</Button>
               <Button disabled={isDeciding} size="sm" variant="outline" onClick={() => onDecision('reject')}>拒绝</Button>
@@ -106,6 +139,14 @@ function ChangeForm({ onCreated, projectId }: { onCreated: () => Promise<void>; 
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
+    if (!reason.trim()) {
+      setError('请填写变更原因。')
+      return
+    }
+    if (!code.trim() || !title.trim()) {
+      setError('请填写拟议需求编号和标题。')
+      return
+    }
     setError('')
     setIsSubmitting(true)
     try {
@@ -131,7 +172,7 @@ function ChangeForm({ onCreated, projectId }: { onCreated: () => Promise<void>; 
   }
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" noValidate onSubmit={onSubmit}>
       <Select label="变更类型" value={type} onChange={(e) => setType(e.target.value)}>
         <option value="add">新增需求</option>
         <option value="modify">修改需求</option>
@@ -153,7 +194,7 @@ function ChangeForm({ onCreated, projectId }: { onCreated: () => Promise<void>; 
         <Textarea label="描述" value={description} onChange={(e) => setDescription(e.target.value)} />
         <Textarea label="验收条件（每行一条）" value={criteria} onChange={(e) => setCriteria(e.target.value)} />
       </div>
-      {error && <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+      {error && <Alert title="无法提交变更" tone="danger">{error}</Alert>}
       <Button className="w-full" disabled={isSubmitting} type="submit">{isSubmitting ? '提交中…' : '提交变更'}</Button>
     </form>
   )

@@ -1,6 +1,6 @@
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus } from 'lucide-react'
+import { Plus, Upload } from 'lucide-react'
 import { useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -33,10 +33,16 @@ export function ProjectListPage() {
           <h1 className="text-2xl font-semibold tracking-tight">项目</h1>
           <p className="text-sm text-muted-foreground">管理客户项目、需求范围与交付验收。</p>
         </div>
-        <Button onClick={() => setIsCreateOpen(true)}>
-          <Plus className="size-4" />
-          新建项目
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => void navigate({ to: '/projects/import' })}>
+            <Upload className="size-4" />
+            导入已有项目
+          </Button>
+          <Button onClick={() => setIsCreateOpen(true)}>
+            <Plus className="size-4" />
+            新建项目
+          </Button>
+        </div>
       </header>
 
       {isLoading && <ListSkeleton />}

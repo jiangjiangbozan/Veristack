@@ -27,6 +27,11 @@ export function importCIReport(
   return request(`/projects/${projectId}/ci-reports`, { body: JSON.stringify(payload), method: 'POST' })
 }
 
+/** 列出项目导入的 CI 报告。 */
+export function listCIReports(projectId: string, page = 1, pageSize = 20): Promise<{ items: CIReport[] }> {
+  return request(`/projects/${projectId}/ci-reports?page=${page}&pageSize=${pageSize}`)
+}
+
 /** 列出项目的 AI 建议。 */
 export function listSuggestions(projectId: string, kind = ''): Promise<{ items: AISuggestion[] }> {
   return request(`/projects/${projectId}/ai/suggestions${kind ? `?kind=${kind}` : ''}`)
